@@ -11,13 +11,13 @@
 | Данные | SDK SQLite, timeline SQLite, черновики, защита сессии Windows | durable outbox, очистка/лимит кеша, профили/медиа, Keystore Android |
 | Медиа | отсутствуют, неподдерживаемый текстовый fallback | upload/download, preview, голосовые, видео, clipboard, drag-and-drop |
 | Звонки | только Rust TURN discovery и тест | реальный WebRTC и Matrix signaling, Android permissions/lifecycle |
-| Windows | Tauri MSVC target, NSIS config | проверка на чистых ОС, подпись, трей, autostart, уведомления |
+| Windows | собраны release EXE и NSIS x64, проверен экран входа на Windows 11 | установка/удаление на чистых ОС, подпись, трей, autostart, уведомления |
 | Android | общий mobile entrypoint, responsive UI, иконки и инструкция | полный runtime, Back bridge, Keystore, APK, тест на устройстве, push |
 | Сервер | только Client-Server API, default homeserver | серверная установка не требуется; push/MatrixRTC согласовываются отдельно |
 
 ## Ближайший порядок
 
-1. Довести сборку и тесты Windows, получить EXE/NSIS и проверить вход на тестовом аккаунте.
+1. Проверить установку/удаление Windows и вход на отдельном тестовом аккаунте; EXE/NSIS и локальные автоматические проверки уже получены.
 2. Исправить найденные проблемы настоящего sync и restart до расширения функциональности.
 3. Добавить файлы/изображения и нативные уведомления Windows, затем профили и участников.
 4. Реализовать Android Keystore, back/lifecycle, собрать и проверить APK.
