@@ -1,42 +1,38 @@
-# Архитектура
-
-## Единое ядро
+# Архитектура 0.2.0
 
 ```mermaid
 flowchart LR
-  UI[React + Zustand] -->|Tauri invoke / events| IPC[Tauri 2]
+  UI[React + Zustand] -->|invoke / events| IPC[Tauri 2]
   IPC --> Core[matrixgram-core]
-  Core --> SDK[Matrix Rust SDK 0.19.1]
-  SDK -->|HTTPS /sync /rooms| Synapse[matrix.mad-frog.ru]
-  SDK --> State[(SDK SQLite state store)]
-  Core --> Timeline[(Timeline SQLite + черновики)]
-  Core --> DPAPI[Windows DPAPI / session.dpapi]
+  Core --> SDK[Matrix Rust SDK 0.19.1 + E2EE]
+  SDK -->|HTTPS| Synapse[matrix.mad-frog.ru]
+  SDK --> Store[(SDK SQLite с паролем)]
+  Core --> Cache[(UI SQLite: кеш / папки / настройки)]
+  Core --> DPAPI[Windows DPAPI: сессия / пароль store / E2EE-черновики]
 ```
 
-`apps/client` — одно приложение Tauri 2 с адаптивным интерфейсом. Windows использует WebView2, Android — системный WebView. `crates/matrixgram-core` не зависит от Tauri: его можно проверять на локальном тестовом сервере.
+Один Tauri-клиент использует WebView2 на Windows и системный WebView на Android. Ядро не зависит от Tauri и проверяется на локальном wiremock. Сеть выполняет Rust, интерфейс получает публичные модели без токена и пароля хранилища.
 
-`Account` владеет `Client`, SQLite-кешем и публичным описанием сессии без токена. Tauri `Backend` управляет жизненным циклом аккаунта и одной задачей синхронизации. UI получает `matrix-update` с ключом `userId|deviceId`; обновления старых сессий отбрасываются.
+`Account` владеет SDK Client, кешем, флагом доступа к E2EE и блокировками операций. Backend содержит одну активную сессию и одну задачу обычного Matrix sync. События несут ключ userId|deviceId, чтобы UI отбрасывал обновления старого аккаунта. Ошибки ведут к переподключению с задержкой 2–30 секунд поверх retry SDK.
 
-## Синхронизация и история
+История — по 50 событий через SDK Room.messages, который расшифровывает доступные события. Ключи существующего backup запрашиваются при открытии E2EE-истории после восстановления. События объединяются по event_id. Исходящие повторы используют тот же transaction ID в пределах процесса.
 
-Используется обычный `/sync`, без необходимости менять настройки Synapse или включать Sliding Sync. После успешной синхронизации SDK сохраняет своё состояние, ядро сохраняет события и обновления комнат, затем отправляет событие интерфейсу. Ошибки запускают переподключение с задержкой 2–30 секунд поверх retry SDK.
-
-История запрашивается через `/rooms/{roomId}/messages` по 50 событий. Начальная история открывается с конца; следующие страницы используют серверный cursor. События объединяются по `event_id`. SDK хранит токен синхронизации; приложение кеширует последние 500 событий на открытие комнаты, а старые страницы остаются в БД и доступны через серверную пагинацию.
-
-Списки комнат и сообщений виртуализированы `@tanstack/react-virtual`. Проекция в `timeline.ts` обрабатывает редактирование только от автора исходного сообщения, реакции, ответы и redaction. Сервер отвечает за авторизацию Matrix-событий. HTML не исполняется: сообщения выводятся как текст React.
-
-Операции SDK и локального кеша не составляют одной транзакции. При аварии между их сохранением возможен пропуск локального события, который восстанавливается повторным запросом истории. Durable outbox пока нет: повтор отправки доступен в пределах процесса с тем же `txn`.
+До действия пользователя известные E2EE-комнаты не загружают историю и не отправляют отметку прочтения. После включения криптография остаётся на стороне SDK; UI получает расшифрованные события или placeholder отсутствующего ключа. Расшифрованная E2EE-история не записывается в открытый кеш приложения.
 
 ## Хранилища
 
-- Путь данных выбирает Tauri `app_local_data_dir`, идентификатор приложения `ru.madfrog.matrixgram`.
-- `accounts/{uuid}/` — отдельное SQLite-хранилище SDK для созданной сессии.
-- `accounts/{uuid}/timeline.sqlite3` — таблицы `events`, `rooms`, `drafts`, `redactions`, WAL.
-- `session.dpapi` — защищённая Windows сессия с токеном и ссылкой на UUID-хранилище.
-- LocalStorage — только тема и локальное закрепление чатов; паролей и токенов там нет.
+- Tauri app_local_data_dir, identifier `ru.madfrog.matrixgram`.
+- `accounts/{uuid}/sdk-e2ee-v1/` — SQLite SDK с отдельным случайным паролем, включая crypto store.
+- `accounts/{uuid}/timeline.sqlite3` — обычные события, комнаты, черновики, redactions и settings; schema version 2, WAL.
+- settings содержит folders, e2ee_enabled и локальное соответствие личных комнат пользователям. Папки относятся к текущей локальной сессии аккаунта, синхронизации между устройствами нет.
+- `accounts/{uuid}/private-drafts/{uuid}` — DPAPI-черновики известных E2EE-комнат на Windows.
+- `session.dpapi` — Matrix-сессия и пароль SDK store. Старая сессия 0.1.0 сохраняет device ID и получает новый SDK store без удаления прежнего кеша.
+- LocalStorage — только тема и закреплённые чаты, без токена, recovery key или паролей.
 
-Кеш переписок не зашифрован на уровне приложения. После выхода старый кеш остаётся на диске и не открывается новой сессией. Очистка кеша, лимит его размера, управление несколькими аккаунтами и миграции после первой схемы ещё нужны.
+Список комнат и сообщения виртуализированы. Проекция проверяет входные поля, авторство правок, реакции и redaction. HTML остаётся текстом. Расшифрованное событие не заменяется старой копией ciphertext из истории.
 
-## Зафиксированные источники API
+Сохранение SDK и UI-кеша не является одной транзакцией; после аварии может понадобиться повторная загрузка истории. Durable outbox, лимит/очистка кеша и multi-account остаются в плане.
 
-Проверено 29 октября 2026: [функции Matrix SDK 0.19.1](https://docs.rs/crate/matrix-sdk/0.19.1/features), [ClientBuilder](https://docs.rs/matrix-sdk/0.19.1/matrix_sdk/struct.ClientBuilder.html), [Matrix Client-Server API](https://spec.matrix.org/latest/client-server-api/), [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). SDK требует Rust не ниже 1.96; проект закрепляет 1.99.1. Фактические версии зависимостей находятся в Cargo.lock и package-lock.json.
+## Источники API
+
+[Matrix SDK 0.19.1 features](https://docs.rs/crate/matrix-sdk/0.19.1/features), [Recovery API](https://docs.rs/matrix-sdk/0.19.1/matrix_sdk/encryption/recovery/struct.Recovery.html), [Matrix Client-Server API](https://spec.matrix.org/latest/client-server-api/), [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). Точные зависимости зафиксированы в Cargo.lock и package-lock.json.

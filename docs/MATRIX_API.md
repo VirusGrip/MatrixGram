@@ -1,26 +1,25 @@
-# Интеграция Matrix API
+# Matrix API 0.2.0
 
-Сетевые вызовы выполняет Matrix Rust SDK 0.19.1. SDK выбирает доступную версию endpoint по возможностям сервера; в тестовом сервере используются пути `/_matrix/client/v3`. Приложение не использует Telegram API и не обращается к Admin API Synapse.
+Все запросы идут через Rust SDK с текущей Matrix-сессией. SDK выбирает доступные версии endpoint; wiremock проверяет пути v3. Admin API Synapse и Telegram API не используются.
 
-| Действие | Matrix API / событие | Реализация |
-|---|---|---|
-| Вход | POST `/login`, `m.login.password` | `Account::login` |
-| Возврат сессии | SDK `matrix_auth.restore_session`, тот же SQLite store | `Account::restore` |
-| Обновления | GET `/sync`, since/timeout | `Account::sync_once` |
-| История | GET `/rooms/{id}/messages`, dir=b, limit=50, from | `Account::history` |
-| Контроль E2EE | GET `/rooms/{id}/state/m.room.encryption` | `Account::writable_room` |
-| Текст и ответ | PUT `/rooms/{id}/send/m.room.message/{txn}`, `m.in_reply_to` | `Account::send_text` |
-| Изменение | `m.room.message`, `m.replace` + `m.new_content` | `Account::edit` |
-| Реакция | `m.reaction`, `m.annotation` | `Account::react` |
-| Удаление | PUT `/rooms/{id}/redact/{eventId}/{txn}` | `Account::redact` |
-| Новая комната | POST `/createRoom`, private_chat/public_chat | `Account::create_room` |
-| Приглашение | invite в createRoom | создание комнаты |
-| Вступление | POST `/join/{roomId}` | `Account::join` |
-| Прочтение | POST `/rooms/{id}/receipt/m.read/{eventId}` | `Account::read` |
-| Набор текста | PUT `/rooms/{id}/typing/{userId}` | Tauri `typing` |
-| TURN | GET `/voip/turnServer` | Rust `turn_servers`; интерфейс вызова ещё отсутствует |
-| Выход | POST `/logout` | `Account::logout` |
+| Действие | Endpoint / событие |
+|---|---|
+| Вход, выход | POST /login, POST /logout |
+| Обновления, история | GET /sync, GET /rooms/{id}/messages |
+| Проверка E2EE | GET /rooms/{id}/state/m.room.encryption |
+| Отправка | PUT /rooms/{id}/send/m.room.message/{txn} или SDK m.room.encrypted |
+| Ответ, правка, реакция | m.in_reply_to, m.replace + m.new_content, m.reaction / m.annotation |
+| Удаление | PUT /rooms/{id}/redact/{eventId}/{txn} |
+| Поиск пользователей | POST /user_directory/search, search_term, limit=30 |
+| Новый личный чат | POST /createRoom, is_direct=true, private_chat; m.direct account data |
+| Новая комната, вступление | POST /createRoom; POST /join/{id} |
+| Прочтение, набор | /receipt/m.read/{eventId}, /typing/{userId} |
+| TURN | GET /voip/turnServer; UI вызова ещё отсутствует |
+| Ключи E2EE | SDK /keys/upload, /keys/query, /keys/claim, /sendToDevice |
+| Восстановление | SDK recovery.recover, secret storage и существующий backup |
 
-Публичные модели интерфейса: `SessionInfo`, `RoomSummary`, `TimelinePage`, `Update`. Имена полей IPC — camelCase. Токен доступа отсутствует во всех моделях UI. Состояние темы и закрепление чатов локальны; они не изменяют account data другого Matrix-клиента.
+Новый личный чат намеренно создаётся через create_room без encryption initial state: SDK create_dm по умолчанию добавляет E2EE, что не соответствует выбранному поведению приложения. Повторное открытие использует SDK m.direct и локальное соответствие, без дублирования комнаты.
 
-Текст не конвертируется в произвольный HTML. Вложенные `formatted_body` и медиа пока получают текстовое представление `body`. Реакции объединяются по event ID, ключу и отправителю; удаление реакции в UI ещё не реализовано. Галочка сообщения подтверждает наличие события в истории, а не прочтение другим участником.
+Публичные модели IPC: SessionInfo, RoomSummary, TimelinePage, EncryptionStatus, UserSearchResult и ChatFolder. Поля camelCase. В моделях нет токена или пароля SDK store. Recovery key и пароль экспорта передаются только в явных командах пользователя и не возвращаются интерфейсу.
+
+Папки — локальная SQLite настройка, без изменения Matrix комнат или удаления чатов. Поиск ограничен видимостью каталога, которую определяет Synapse. Форматированный HTML и вложения пока отображаются только текстовым body.
