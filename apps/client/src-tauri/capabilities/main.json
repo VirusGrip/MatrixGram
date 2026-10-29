@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Local UI can listen to Matrix updates. No filesystem or remote web permissions.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

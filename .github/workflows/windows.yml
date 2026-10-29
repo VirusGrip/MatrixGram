@@ -1,0 +1,37 @@
+name: Windows checks and build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - run: cargo fmt --all -- --check
+      - run: cargo test -p matrixgram-core --locked
+      - run: npm test
+      - run: npm run check:policy
+      - run: npm exec -w @matrixgram/client -- playwright install chromium
+      - run: npm run test:e2e
+      - run: npm run tauri -- build --bundles nsis
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MatrixGram-Windows-unsigned
+          path: |
+            target/release/matrixgram.exe
+            target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

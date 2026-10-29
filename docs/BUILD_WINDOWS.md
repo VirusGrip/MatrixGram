@@ -1,0 +1,38 @@
+# Сборка и установка Windows
+
+## Требования
+
+- Windows 10/11 x64 с WebView2 Runtime.
+- Node.js 24 и npm.
+- Rust 1.99.1 MSVC (версия закреплена в rust-toolchain.toml).
+- Microsoft Visual C++ Build Tools, workload Desktop development with C++, Windows 10/11 SDK.
+- Свободное место для Rust dependencies и промежуточных файлов: рекомендуется 10 ГБ и более.
+
+Официальная инструкция: [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows).
+
+## Команды из корня репозитория
+
+```powershell
+npm ci
+cargo test -p matrixgram-core --locked
+npm test
+npm run build
+npm run check:policy
+npm run tauri -- dev
+```
+
+Установщик:
+
+```powershell
+npm run tauri -- build --bundles nsis
+```
+
+По умолчанию EXE: `target/release/matrixgram.exe`, установщик: `target/release/bundle/nsis/MatrixGram_0.1.0_x64-setup.exe`. При заданном `CARGO_TARGET_DIR` ищите их в этой папке. Доступные фактически собранные файлы и контрольные суммы перечисляются в `releases/` и PROGRESS.md.
+
+Установщик предназначен для текущего пользователя. При отсутствии WebView2 Tauri предлагает установить runtime. Для работы без интернета WebView2 нужно заранее установить отдельно.
+
+Приложение и установщик на этом этапе не подписаны сертификатом разработчика. Проверка установщика, запуска, удаления и работы на чистой Windows 10 и Windows 11 — отдельные пункты проверки. Автоматического обновления, трея, автозапуска и фоновых уведомлений пока нет.
+
+## Нестандартное окружение этой разработки
+
+Rust и минимальные MSVC/SDK-инструменты подготовлены локально в рабочей папке, вне системной установки Visual Studio. Из-за свободного места часть промежуточных файлов временно направлялась в отдельную папку на D:. После появления свободного места финальная сборка выполнена в `work/target` вне репозитория. Это локальная особенность окружения, не требование проекта. Пользовательские данные сервера и конфигурация Synapse не затрагивались.

@@ -1,0 +1,17 @@
+[workspace]
+members = ["crates/matrixgram-core", "apps/client/src-tauri"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 8
+
+[profile.dev]
+debug = 0
+incremental = true

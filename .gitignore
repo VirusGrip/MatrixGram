@@ -1,0 +1,17 @@
+node_modules/
+target/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.log
+*.tsbuildinfo
+releases/
+.env*
+!.env.example
+*.pfx
+*.jks
+*.keystore
+apps/client/src-tauri/gen/
+.DS_Store
+Thumbs.db
