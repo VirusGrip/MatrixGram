@@ -34,6 +34,37 @@ pub struct TimelinePage {
     pub next: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptionStatus {
+    pub enabled: bool,
+    pub backup_ready: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatFolder {
+    pub id: String,
+    pub name: String,
+    pub room_ids: Vec<String>,
+    #[serde(default)]
+    pub unread_only: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryUser {
+    pub user_id: String,
+    pub display_name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSearchResult {
+    pub users: Vec<DirectoryUser>,
+    pub limited: bool,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Update {

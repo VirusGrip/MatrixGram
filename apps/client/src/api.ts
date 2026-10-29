@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { SessionInfo, RoomSummary, MatrixEvent, TimelinePage, Update } from './models';
+import type { SessionInfo, RoomSummary, MatrixEvent, TimelinePage, Update, EncryptionStatus, ChatFolder, UserSearchResult } from './models';
 
 export const nativeAvailable = () => isTauri();
 export const api = {
@@ -21,6 +21,14 @@ export const api = {
   draft: (roomId: string) => invoke<string>('draft', { roomId }),
   saveDraft: (roomId: string, body: string) => invoke<void>('save_draft', { roomId, body }),
   typing: (roomId: string, active: boolean) => invoke<void>('typing', { roomId, active }),
+  encryptionStatus: () => invoke<EncryptionStatus>('encryption_status'),
+  enableEncryption: () => invoke<EncryptionStatus>('enable_encryption'),
+  recoverEncryption: (key: string) => invoke<EncryptionStatus>('recover_encryption', { key }),
+  importEncryptionKeys: (exportText: string, passphrase: string) => invoke<number>('import_encryption_keys', { export: exportText, passphrase }),
+  folders: () => invoke<ChatFolder[]>('get_folders'),
+  saveFolders: (folders: ChatFolder[]) => invoke<ChatFolder[]>('save_folders', { folders }),
+  searchUsers: (term: string) => invoke<UserSearchResult>('search_users', { term }),
+  openDirect: (userId: string) => invoke<string>('open_direct', { userId }),
 };
 
 export function onUpdate(callback: (sessionKey: string, update: Update) => void) {

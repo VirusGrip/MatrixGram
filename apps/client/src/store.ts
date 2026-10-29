@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { api } from './api';
 import { mergeEvents } from './timeline';
-import type { MatrixEvent, RoomSummary, SessionInfo, Update, PendingMessage } from './models';
+import type { MatrixEvent, RoomSummary, SessionInfo, Update, PendingMessage, EncryptionStatus, ChatFolder } from './models';
 
 interface Store {
   session: SessionInfo | null; rooms: RoomSummary[]; activeRoom: string | null;
   events: Record<string, MatrixEvent[]>; cursors: Record<string, string | null>;
   pending: PendingMessage[]; connection: string; error: string | null;
+  encryption: EncryptionStatus; folders: ChatFolder[];
+  loadFeatures: () => Promise<void>;
   setSession: (session: SessionInfo | null) => void;
   setError: (error: unknown) => void;
   apply: (key: string, update: Update) => void;
@@ -15,10 +17,15 @@ interface Store {
   send: (roomId: string, body: string, replyTo?: string, txn?: string) => Promise<boolean>;
   clear: () => void;
 }
-const empty = { session: null, rooms: [], activeRoom: null, events: {}, cursors: {}, pending: [], connection: 'connecting', error: null };
+const empty = { session: null, rooms: [], activeRoom: null, events: {}, cursors: {}, pending: [], connection: 'connecting', error: null, encryption: { enabled: false, backupReady: false }, folders: [] };
 export const useStore = create<Store>((set, get) => ({
   ...empty,
   setSession: session => set({ session }),
+  loadFeatures: async () => {
+    const session = get().session;
+    const [encryption, folders] = await Promise.all([api.encryptionStatus(), api.folders()]);
+    if (session && get().session === session) set({ encryption, folders });
+  },
   setError: error => set({ error: error == null ? null : String(error) }),
   apply: (key, update) => {
     const state = get();

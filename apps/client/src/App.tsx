@@ -1,27 +1,14 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowLeft, Check, CheckCheck, CircleAlert, Hash, Info, LockKeyhole, LogOut, MessageCircle, Moon, Pencil, Pin, Plus, Reply, Search, Send, Settings, ShieldOff, Sun, Trash2, Users, Wifi, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, Check, CheckCheck, CircleAlert, Folder, Hash, Info, KeyRound, LockKeyhole, LogOut, MessageCircle, Moon, Pencil, Pin, Plus, Reply, Search, Send, Settings, ShieldOff, Sun, Trash2, Users, Wifi, WifiOff, X } from 'lucide-react';
 import { api, nativeAvailable, onConnection, onUpdate } from './api';
 import { useStore } from './store';
 import { projectTimeline } from './timeline';
 import type { Message, RoomSummary } from './models';
-
-function Avatar({ name, size = '' }: { name: string; size?: string }) {
-  const colors = ['#568cc9', '#b17ac6', '#5ba9a0', '#d29668', '#7484cc'];
-  const hash = [...name].reduce((n, c) => n + c.charCodeAt(0), 0);
-  return <span className={`avatar ${size}`} style={{ background: colors[hash % colors.length] }} aria-hidden="true">{name.replace(/^[@!#]/, '').slice(0, 2).toUpperCase()}</span>;
-}
+import { Avatar, Modal } from './ui';
+import { EncryptionDialog, FolderManager, PeopleSearch } from './SidebarFeatures';
 const time = (ts: number) => new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 const date = (ts: number) => new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-
-function Modal({ title, children, close }: { title: string; children: ReactNode; close: () => void }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => { const dialog = ref.current; dialog?.showModal(); return () => dialog?.close(); }, []);
-  return <dialog ref={ref} className="modal" onCancel={close} aria-label={title}>
-    <header><h2>{title}</h2><button className="icon-button" onClick={close} aria-label="Закрыть"><X size={21}/></button></header>
-    {children}
-  </dialog>;
-}
 
 function Login({ loading }: { loading: boolean }) {
   const [server, setServer] = useState('https://matrix.mad-frog.ru');
@@ -55,9 +42,9 @@ function Login({ loading }: { loading: boolean }) {
         <button className="primary login-submit" type="submit" disabled={busy || !nativeAvailable()}>{busy ? 'Подключаемся…' : 'Войти в MatrixGram'}<Send size={18}/></button>
       </form>}
       {error && !loading && <button className="text-button" onClick={() => { void api.forget().then(() => useStore.getState().setError(null)).catch(e => useStore.getState().setError(e)); }}>Сбросить сохранённую сессию на этом устройстве</button>}
-      <p className="login-note"><ShieldOff size={17}/>Только незашифрованные комнаты.<br/>E2EE в этом клиенте не поддерживается.</p>
+      <p className="login-note"><KeyRound size={17}/>Зашифрованные комнаты можно открыть после входа.<br/>Восстановление ключей необязательно.</p>
     </section>
-    <footer>MatrixGram · 0.1.0 · ранняя версия</footer>
+    <footer>MatrixGram · 0.2.0 · ранняя версия</footer>
   </main>;
 }
 
@@ -72,7 +59,7 @@ function RoomList({ rooms, selected, pins, select, togglePin }: { rooms: RoomSum
         return <div className={`room-row ${selected === room.id ? 'selected' : ''}`} key={room.id} style={{ transform: `translateY(${row.start}px)` }}>
           <button className="room-select" onClick={() => select(room.id)} aria-label={`Открыть ${room.name}`}>
             <Avatar name={room.name}/><span className="room-copy"><span className="room-top"><strong>{room.encryption === 'encrypted' && <LockKeyhole size={12}/>} {room.name}</strong><time>{room.lastTs ? time(room.lastTs) : ''}</time></span>
-              <span className="room-bottom"><span>{room.membership === 'invited' ? 'Приглашение в комнату' : room.encryption === 'encrypted' ? 'E2EE не поддерживается' : room.lastBody || 'Пока нет сообщений'}</span>{room.unread > 0 && <b className="badge">{room.unread}</b>}</span>
+              <span className="room-bottom"><span>{room.membership === 'invited' ? 'Приглашение в комнату' : room.encryption === 'encrypted' ? 'Зашифрованная переписка' : room.lastBody || 'Пока нет сообщений'}</span>{room.unread > 0 && <b className="badge">{room.unread}</b>}</span>
             </span>
           </button>
           <button className={`pin-button ${pins.includes(room.id) ? 'pinned' : ''}`} aria-label={`${pins.includes(room.id) ? 'Открепить' : 'Закрепить'} ${room.name}`} onClick={() => togglePin(room.id)}><Pin size={12}/></button>
@@ -104,18 +91,19 @@ function CreateRoom({ close }: { close: () => void }) {
 
 function Preferences({ close, theme, setTheme }: { close: () => void; theme: string; setTheme: (value: string) => void }) {
   const session = useStore(s => s.session)!;
+  const encryptedEnabled = useStore(s => s.encryption.enabled);
   const [confirm, setConfirm] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   return <Modal title="Настройки" close={close}>
     <div className="profile"><Avatar name={session.userId} size="large"/><strong>{session.userId}</strong><span>{session.homeserver}</span></div>
     <div className="settings-section"><h3>Оформление</h3><div className="segmented"><button className={theme === 'light' ? 'active' : ''} onClick={() => setTheme('light')}><Sun size={17}/>Светлая</button><button className={theme === 'dark' ? 'active' : ''} onClick={() => setTheme('dark')}><Moon size={17}/>Тёмная</button></div></div>
-    <div className="settings-section"><h3>Сессия</h3><p className="muted">Устройство: {session.deviceId}</p><p className="muted">{session.persisted ? 'Сессия защищена Windows DPAPI.' : 'Сессия хранится только до закрытия приложения. Постоянное хранение Android ещё не реализовано.'}</p><p className="muted">Один активный аккаунт. E2EE отключено в сборке.</p></div>
+    <div className="settings-section"><h3>Сессия</h3><p className="muted">Устройство: {session.deviceId}</p><p className="muted">{session.persisted ? 'Сессия и ключ хранилища защищены Windows DPAPI.' : 'Сессия хранится только до закрытия приложения. Постоянное хранение Android ещё не реализовано.'}</p><p className="muted">Ключи E2EE можно подключить кнопкой сбоку.</p></div>
     <div className="settings-section"><h3>Ранняя версия</h3><p className="muted">Звонки, вложения, уведомления, голосовые сообщения, несколько аккаунтов и управление устройствами ещё в разработке.</p></div>
     {error && <p className="form-error" role="alert">{error}</p>}
-    {confirm ? <div className="confirm-row"><span>Завершить эту сессию на сервере?</span><button className="danger" disabled={busy} onClick={async () => { setBusy(true); try { await api.logout(); useStore.getState().clear(); close(); } catch (e) { setError(String(e)); } finally { setBusy(false); } }}>Выйти</button><button className="text-button" onClick={() => setConfirm(false)}>Отмена</button></div> : <button className="logout-button" onClick={() => setConfirm(true)}><LogOut size={18}/>Выйти из аккаунта</button>}
+    {confirm ? <div className="confirm-row"><span>Завершить эту сессию на сервере?{encryptedEnabled && ' Ключи, которых нет в резервной копии или экспорте, могут стать недоступны после выхода.'}</span><button className="danger" disabled={busy} onClick={async () => { setBusy(true); try { await api.logout(); useStore.getState().clear(); close(); } catch (e) { setError(String(e)); } finally { setBusy(false); } }}>Выйти</button><button className="text-button" onClick={() => setConfirm(false)}>Отмена</button></div> : <button className="logout-button" onClick={() => setConfirm(true)}><LogOut size={18}/>Выйти из аккаунта</button>}
   </Modal>;
 }
 
-function Chat({ room, showInfo, toggleInfo }: { room: RoomSummary; showInfo: boolean; toggleInfo: () => void }) {
+function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummary; showInfo: boolean; toggleInfo: () => void; openEncryption: () => void }) {
   const session = useStore(s => s.session)!;
   const raw = useStore(s => s.events[room.id]);
   const messages = useMemo(() => projectTimeline(raw ?? []), [raw]);
@@ -129,7 +117,8 @@ function Chat({ room, showInfo, toggleInfo }: { room: RoomSummary; showInfo: boo
   draftBody.current = body; editing.current = edit !== null;
   const filtered = useMemo(() => messages.filter(m => !find || m.body.toLocaleLowerCase().includes(find.toLocaleLowerCase())), [messages, find]);
   const rows = useVirtualizer({ count: filtered.length, getScrollElement: () => scroll.current, estimateSize: () => 102, overscan: 10, getItemKey: i => filtered[i].id });
-  const blocked = room.encryption === 'encrypted';
+  const e2eeEnabled = useStore(s => s.encryption.enabled);
+  const blocked = room.encryption === 'encrypted' && !e2eeEnabled;
 
   useEffect(() => {
     if (room.membership !== 'joined' || blocked) { setLoading(false); return; }
@@ -182,12 +171,13 @@ function Chat({ room, showInfo, toggleInfo }: { room: RoomSummary; showInfo: boo
   return <section className="chat-panel">
     <header className="chat-header">
       <button className="icon-button back-button" aria-label="Назад к чатам" onClick={() => useStore.getState().select(null)}><ArrowLeft/></button>
-      <Avatar name={room.name} size="small"/><div className="chat-heading"><h2>{room.name}</h2><span>{room.membership === 'invited' ? 'Вас пригласили' : `${room.members} участников`} · {blocked ? 'E2EE не поддерживается' : 'Matrix'}</span></div>
+      <Avatar name={room.name} size="small"/><div className="chat-heading"><h2>{room.name}</h2><span>{room.membership === 'invited' ? 'Вас пригласили' : `${room.members} участников`} · {room.encryption === 'encrypted' ? 'Сквозное шифрование' : 'Matrix'}</span></div>
+      {room.encryption === 'encrypted' && <button className="icon-button" aria-label="Ключи комнаты" onClick={openEncryption}><KeyRound size={20}/></button>}
       <button className="icon-button" aria-label="Поиск в загруженных сообщениях" onClick={() => setSearchOpen(!searchOpen)}><Search size={21}/></button>
       <button className={`icon-button ${showInfo ? 'accent' : ''}`} aria-label="Информация о комнате" onClick={toggleInfo}><Info size={21}/></button>
     </header>
     {searchOpen && <div className="chat-search"><Search size={17}/><input autoFocus placeholder="Поиск в загруженной истории" value={find} onChange={e => setFind(e.target.value)}/><button className="icon-button" aria-label="Закрыть поиск" onClick={() => { setSearchOpen(false); setFind(''); }}><X size={18}/></button></div>}
-    {room.membership === 'invited' ? <div className="chat-state"><Users size={42}/><h2>Приглашение в комнату</h2><p>{room.name}</p><button className="primary" onClick={() => { void api.join(room.id).then(async () => useStore.setState({ rooms: await api.rooms() })).catch(e => useStore.getState().setError(e)); }}>Вступить</button></div> : blocked ? <div className="chat-state"><LockKeyhole size={44}/><h2>Зашифрованная комната</h2><p>MatrixGram не поддерживает E2EE.<br/>Используйте совместимый клиент для этой переписки.</p><span className="security-pill">Настройки комнаты не изменяются</span></div> : <>
+    {room.membership === 'invited' ? <div className="chat-state"><Users size={42}/><h2>Приглашение в комнату</h2><p>{room.name}</p><button className="primary" onClick={() => { void api.join(room.id).then(async () => useStore.setState({ rooms: await api.rooms() })).catch(e => useStore.getState().setError(e)); }}>Вступить</button></div> : blocked ? <div className="chat-state"><LockKeyhole size={44}/><h2>Зашифрованная комната</h2><p>Откройте доступные сообщения сейчас.<br/>Ключи для старой истории можно подключить позже.</p><button className="primary" onClick={openEncryption}>Открыть зашифрованные комнаты</button></div> : <>
       <div className="timeline" ref={scroll} onScroll={() => { const el = scroll.current; if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120; }} aria-label="Сообщения">
         <div className="history-control"><button className="text-button" disabled={loading || cursor === null} onClick={() => { void older(); }}>{loading ? 'Загружаем историю…' : cursor === null ? 'Начало доступной истории' : 'Загрузить более ранние'}</button></div>
         {!messages.length && !loading && <div className="chat-state small-state"><MessageCircle size={38}/><p>Начните разговор</p></div>}
@@ -234,9 +224,14 @@ export default function App() {
   const [creating, setCreating] = useState(false), [settings, setSettings] = useState(false), [info, setInfo] = useState(window.innerWidth >= 1200);
   const [theme, setThemeValue] = useState(localStorage.getItem('matrixgram.theme') ?? 'light');
   const [pins, setPins] = useState<string[]>([]);
+  const [peopleOpen, setPeopleOpen] = useState(false), [foldersOpen, setFoldersOpen] = useState(false), [encryptionOpen, setEncryptionOpen] = useState(false);
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  const folders = useStore(s => s.folders), encryption = useStore(s => s.encryption);
   const pinKey = `matrixgram.pins.${session?.homeserver}.${session?.userId}`;
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('matrixgram.theme', theme); }, [theme]);
   useEffect(() => { try { const value: unknown = JSON.parse(localStorage.getItem(pinKey) ?? '[]'); setPins(Array.isArray(value) ? value.filter(v => typeof v === 'string') : []); } catch { setPins([]); } }, [pinKey]);
+  useEffect(() => { if (session) void useStore.getState().loadFeatures().catch(e => useStore.getState().setError(e)); }, [session]);
+  useEffect(() => { if (activeFolder && !folders.some(f => f.id === activeFolder)) setActiveFolder(null); }, [folders, activeFolder]);
   useEffect(() => {
     if (!nativeAvailable()) return;
     let disposed = false; const cleanup: (() => void)[] = [];
@@ -252,22 +247,30 @@ export default function App() {
     return () => { disposed = true; cleanup.forEach(fn => fn()); };
   }, []);
   const room = rooms.find(r => r.id === activeRoom);
-  const shown = useMemo(() => rooms.filter(r => r.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) && (tab !== 'unread' || r.unread > 0) && (tab !== 'pinned' || pins.includes(r.id)))
-    .sort((a, b) => Number(pins.includes(b.id)) - Number(pins.includes(a.id))), [rooms, search, tab, pins]);
+  const shown = useMemo(() => {
+    const folder = folders.find(f => f.id === activeFolder);
+    return rooms.filter(r => r.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) && (tab !== 'unread' || r.unread > 0) && (tab !== 'pinned' || pins.includes(r.id)) && (!folder || folder.roomIds.includes(r.id) && (!folder.unreadOnly || r.unread > 0)))
+      .sort((a, b) => Number(pins.includes(b.id)) - Number(pins.includes(a.id)));
+  }, [rooms, search, tab, pins, folders, activeFolder]);
   if (!session) return <Login loading={booting}/>;
   function togglePin(id: string) { const value = pins.includes(id) ? pins.filter(p => p !== id) : [...pins, id]; setPins(value); localStorage.setItem(pinKey, JSON.stringify(value)); }
   return <main className={`app-shell ${activeRoom ? 'has-active' : ''} ${info && room ? 'with-info' : ''}`}>
-    <nav className="rail" aria-label="Главное меню"><div className="rail-brand"><Send size={25}/></div><button className="rail-button active" aria-label="Все чаты" onClick={() => setTab('all')}><MessageCircle size={23}/><span>Чаты</span></button><div className="rail-spacer"/><button className="rail-button" aria-label="Сменить тему" onClick={() => setThemeValue(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? <Moon size={21}/> : <Sun size={21}/>}</button><button className="rail-button" aria-label="Настройки" onClick={() => setSettings(true)}><Settings size={22}/></button><Avatar name={session.userId} size="tiny"/></nav>
+    <nav className="rail" aria-label="Главное меню"><div className="rail-brand"><Send size={25}/></div><button className="rail-button active" aria-label="Все чаты" onClick={() => { setTab('all'); setActiveFolder(null); }}><MessageCircle size={23}/><span>Чаты</span></button><button className="rail-button" onClick={() => setFoldersOpen(true)} aria-label="Управление папками"><Folder size={23}/><span>ПАПКИ</span></button><div className="rail-spacer"/><button className="rail-button" aria-label="Сменить тему" onClick={() => setThemeValue(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? <Moon size={21}/> : <Sun size={21}/>}</button><button className="rail-button" aria-label="Настройки" onClick={() => setSettings(true)}><Settings size={22}/></button><Avatar name={session.userId} size="tiny"/></nav>
     <aside className="sidebar"><header className="sidebar-heading"><div><span className="eyebrow">MATRIXGRAM</span><h1>Сообщения<span>.</span></h1></div><button className="icon-button new-room" aria-label="Новая комната" onClick={() => setCreating(true)}><Plus size={23}/></button><button className="icon-button mobile-settings" aria-label="Настройки" onClick={() => setSettings(true)}><Settings size={20}/></button></header>
-      <label className="search-field"><Search size={18}/><input placeholder="Найти чат" value={search} onChange={e => setSearch(e.target.value)} aria-label="Найти чат"/></label>
+      <div className="search-with-people"><label className="search-field"><Search size={18}/><input placeholder="Найти чат" value={search} onChange={e => setSearch(e.target.value)} aria-label="Найти чат"/></label><button className="icon-button" aria-label="Поиск пользователей" title="Поиск людей по имени" onClick={() => setPeopleOpen(true)}><Users size={21}/></button></div>
+      <section className="folders-section" aria-label="ПАПКИ"><header><strong>ПАПКИ</strong><button className="icon-button" aria-label="Настроить ПАПКИ" onClick={() => setFoldersOpen(true)}><Plus size={16}/></button></header><div className="folder-tabs"><button className={activeFolder === null ? 'active' : ''} onClick={() => setActiveFolder(null)}>Все</button>{folders.map(folder => <button key={folder.id} className={activeFolder === folder.id ? 'active' : ''} onClick={() => { setActiveFolder(folder.id); setTab('all'); }}>{folder.name}</button>)}</div></section>
       <div className="chat-tabs"><button className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>Все чаты <span>{rooms.length}</span></button><button className={tab === 'unread' ? 'active' : ''} onClick={() => setTab('unread')}>Новые</button><button className={tab === 'pinned' ? 'active' : ''} onClick={() => setTab('pinned')} aria-label="Закреплённые чаты"><Pin size={15}/></button></div>
       <RoomList rooms={shown} selected={activeRoom} pins={pins} select={id => useStore.getState().select(id)} togglePin={togglePin}/>
-      <div className={`connection ${connection === 'online' ? 'online' : ''}`}>{connection === 'online' ? <Wifi size={14}/> : <WifiOff size={14}/>}<span>{connection === 'online' ? 'Подключено к Matrix' : connection === 'reconnecting' ? 'Переподключение…' : 'Синхронизация…'}</span><small>0.1.0</small></div>
+      <button className={`encryption-side-button ${encryption.enabled ? 'enabled' : ''}`} aria-label="Открыть зашифрованные комнаты" onClick={() => setEncryptionOpen(true)}><KeyRound size={19}/><span><strong>Открыть зашифрованные комнаты</strong><small>{encryption.enabled ? 'Ключи и восстановление' : 'Необязательно'}</small></span></button>
+      <div className={`connection ${connection === 'online' ? 'online' : ''}`}>{connection === 'online' ? <Wifi size={14}/> : <WifiOff size={14}/>}<span>{connection === 'online' ? 'Подключено к Matrix' : connection === 'reconnecting' ? 'Переподключение…' : 'Синхронизация…'}</span><small>0.2.0</small></div>
     </aside>
-    {room ? <Chat key={room.id} room={room} showInfo={info} toggleInfo={() => setInfo(!info)}/> : <section className="welcome"><div className="welcome-icon"><MessageCircle size={50} strokeWidth={1.4}/></div><span className="eyebrow">ОБЩЕНИЕ БЕЗ ЛИШНЕГО</span><h2>На связи.<br/>В своей сети.</h2><p>Выберите чат слева<br/>или начните новый разговор.</p><button className="primary" onClick={() => setCreating(true)}><Plus size={18}/>Новая комната</button><span className="welcome-server"><span/>{session.homeserver.replace('https://', '').replace(/\/$/, '')}</span></section>}
-    {room && info && <aside className="details"><header><h3>О комнате</h3><button className="icon-button" aria-label="Скрыть информацию" onClick={() => setInfo(false)}><X size={19}/></button></header><div className="room-profile"><Avatar name={room.name} size="large"/><h2>{room.name}</h2><span>{room.members} участников</span></div><div className="detail-item"><Hash size={20}/><div><small>Matrix ID комнаты</small><p>{room.id}</p></div></div>{room.topic && <div className="detail-item"><Info size={20}/><div><small>Описание</small><p>{room.topic}</p></div></div>}<div className="detail-item"><ShieldOff size={20}/><div><small>Шифрование</small><p>{room.encryption === 'encrypted' ? 'E2EE · не поддерживается' : room.encryption === 'unknown' ? 'Проверяется перед отправкой' : 'Без сквозного шифрования'}</p></div></div><div className="details-note"><Info size={17}/><p>MatrixGram 0.1.0<br/>Вложения и звонки ещё в разработке.</p></div></aside>}
+    {room ? <Chat key={room.id} room={room} showInfo={info} toggleInfo={() => setInfo(!info)} openEncryption={() => setEncryptionOpen(true)}/> : <section className="welcome"><div className="welcome-icon"><MessageCircle size={50} strokeWidth={1.4}/></div><span className="eyebrow">ОБЩЕНИЕ БЕЗ ЛИШНЕГО</span><h2>На связи.<br/>В своей сети.</h2><p>Выберите чат слева<br/>или начните новый разговор.</p><button className="primary" onClick={() => setCreating(true)}><Plus size={18}/>Новая комната</button><span className="welcome-server"><span/>{session.homeserver.replace('https://', '').replace(/\/$/, '')}</span></section>}
+    {room && info && <aside className="details"><header><h3>О комнате</h3><button className="icon-button" aria-label="Скрыть информацию" onClick={() => setInfo(false)}><X size={19}/></button></header><div className="room-profile"><Avatar name={room.name} size="large"/><h2>{room.name}</h2><span>{room.members} участников</span></div><div className="detail-item"><Hash size={20}/><div><small>Matrix ID комнаты</small><p>{room.id}</p></div></div>{room.topic && <div className="detail-item"><Info size={20}/><div><small>Описание</small><p>{room.topic}</p></div></div>}<div className="detail-item"><ShieldOff size={20}/><div><small>Шифрование</small><p>{room.encryption === 'encrypted' ? 'E2EE · ключи подключаются сбоку' : room.encryption === 'unknown' ? 'Проверяется перед отправкой' : 'Без сквозного шифрования'}</p></div></div><div className="details-note"><Info size={17}/><p>MatrixGram 0.2.0<br/>Вложения и звонки ещё в разработке.</p></div></aside>}
     {error && <div className="toast" role="alert"><CircleAlert size={20}/><span>{error}</span><button className="icon-button" aria-label="Закрыть уведомление" onClick={() => useStore.getState().setError(null)}><X size={18}/></button></div>}
     {creating && <CreateRoom close={() => setCreating(false)}/>}
     {settings && <Preferences close={() => setSettings(false)} theme={theme} setTheme={setThemeValue}/>}
+    {peopleOpen && <PeopleSearch close={() => setPeopleOpen(false)}/>}
+    {foldersOpen && <FolderManager close={() => setFoldersOpen(false)}/>}
+    {encryptionOpen && <EncryptionDialog close={() => setEncryptionOpen(false)}/>}
   </main>;
 }

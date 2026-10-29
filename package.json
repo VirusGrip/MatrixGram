@@ -1,8 +1,10 @@
 {
   "name": "matrixgram",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "workspaces": ["apps/client"],
+  "workspaces": [
+    "apps/client"
+  ],
   "scripts": {
     "dev": "npm run dev -w @matrixgram/client",
     "build": "npm run build -w @matrixgram/client",
@@ -11,5 +13,7 @@
     "tauri": "npm run tauri -w @matrixgram/client --",
     "check:policy": "node scripts/check-policy.mjs"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  }
 }

@@ -1,6 +1,8 @@
 use matrixgram_core::{
     Account,
-    models::{RoomSummary, SessionInfo, TimelinePage},
+    models::{
+        ChatFolder, EncryptionStatus, RoomSummary, SessionInfo, TimelinePage, UserSearchResult,
+    },
 };
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
@@ -137,8 +139,7 @@ async fn cached_timeline(state: State<'_, Backend>, room_id: String) -> Result<V
     state
         .account()
         .await?
-        .cache
-        .events(&room_id)
+        .cached_timeline(&room_id)
         .map_err(|e| e.to_string())
 }
 
@@ -260,7 +261,6 @@ async fn draft(state: State<'_, Backend>, room_id: String) -> Result<String, Str
     state
         .account()
         .await?
-        .cache
         .draft(&room_id)
         .map_err(|e| e.to_string())
 }
@@ -277,8 +277,86 @@ async fn save_draft(
     state
         .account()
         .await?
-        .cache
         .save_draft(&room_id, &body)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn encryption_status(state: State<'_, Backend>) -> Result<EncryptionStatus, String> {
+    Ok(state.account().await?.encryption_status().await)
+}
+
+#[tauri::command]
+async fn enable_encryption(state: State<'_, Backend>) -> Result<EncryptionStatus, String> {
+    state
+        .account()
+        .await?
+        .enable_encryption()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn recover_encryption(
+    state: State<'_, Backend>,
+    key: String,
+) -> Result<EncryptionStatus, String> {
+    state
+        .account()
+        .await?
+        .recover_encryption(key)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn import_encryption_keys(
+    state: State<'_, Backend>,
+    export: String,
+    passphrase: String,
+) -> Result<usize, String> {
+    state
+        .account()
+        .await?
+        .import_encryption_keys(export, passphrase)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_folders(state: State<'_, Backend>) -> Result<Vec<ChatFolder>, String> {
+    state.account().await?.folders().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_folders(
+    state: State<'_, Backend>,
+    folders: Vec<ChatFolder>,
+) -> Result<Vec<ChatFolder>, String> {
+    state
+        .account()
+        .await?
+        .save_folders(folders)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn search_users(state: State<'_, Backend>, term: String) -> Result<UserSearchResult, String> {
+    state
+        .account()
+        .await?
+        .search_users(&term)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn open_direct(state: State<'_, Backend>, user_id: String) -> Result<String, String> {
+    state
+        .account()
+        .await?
+        .open_direct(&user_id)
+        .await
         .map_err(|e| e.to_string())
 }
 
@@ -315,7 +393,15 @@ pub fn run() {
             mark_read,
             draft,
             save_draft,
-            typing
+            typing,
+            encryption_status,
+            enable_encryption,
+            recover_encryption,
+            import_encryption_keys,
+            get_folders,
+            save_folders,
+            search_users,
+            open_direct
         ])
         .run(tauri::generate_context!())
         .expect("Не удалось запустить MatrixGram");

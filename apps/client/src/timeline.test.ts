@@ -40,6 +40,10 @@ describe('Matrix event projection', () => {
     const redacted = { ...message, content: {}, unsigned: { redacted_because: {} } };
     expect(mergeEvents([redacted], [message])[0]).toEqual(redacted);
   });
+  it('keeps an already decrypted message if a stale encrypted page arrives', () => {
+    const ciphertext = { ...message, type: 'm.room.encrypted', content: { ciphertext: 'opaque' } };
+    expect(mergeEvents([message], [ciphertext])[0]).toEqual(message);
+  });
   it('never displays ciphertext as a normal message', () => {
     const result = projectTimeline([event('$secret', 'm.room.encrypted', { body: 'ciphertext', ciphertext: 'secret' })]);
     expect(result[0].encrypted).toBe(true);

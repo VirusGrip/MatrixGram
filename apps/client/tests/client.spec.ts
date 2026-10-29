@@ -11,9 +11,11 @@ const rooms = [
 const updates = new Set();
 let events = [{event_id:'$hello',sender:'@bob:test',type:'m.room.message',origin_server_ts:1000,content:{msgtype:'m.text',body:'Привет, команда!'}}];
 let drafts = {};
+let encryption = {enabled:false,backupReady:false};
+let folders = JSON.parse(localStorage.getItem('test-folders') || '[]');
 export const api = {
  bootstrap:async()=>null, login:async()=>session, rooms:async()=>rooms, logout:async()=>{}, forget:async()=>{},
- cached:async id=>id==='!plain:test'?events:[], history:async id=>{if(id==='!secret:test')window.__secretHistoryCount=(window.__secretHistoryCount||0)+1;return {roomId:id,events:id==='!plain:test'?events:[],next:null}},
+ cached:async id=>id==='!plain:test'?events:[], history:async id=>{if(id==='!secret:test')window.__secretHistoryCount=(window.__secretHistoryCount||0)+1;return {roomId:id,events:id==='!plain:test'?events:id==='!secret:test'&&encryption.enabled?[{event_id:'$secret',sender:'@bob:test',type:'m.room.message',origin_server_ts:2000,content:{body:'Открытое сообщение E2EE'}}]:[],next:null}},
  draft:async id=>drafts[id]||'',saveDraft:async(id,body)=>{drafts[id]=body},typing:async()=>{},read:async()=>{},
  send:async(roomId,body,txn,replyTo)=>{
    window.__sendCount=(window.__sendCount||0)+1;
@@ -24,7 +26,13 @@ export const api = {
    setTimeout(()=>updates.forEach(update=>update(session.userId+'|'+session.deviceId, {rooms,timelines:[{roomId,events,next:null}],connection:'online',error:null})),20);
    return id;
  },
- edit:async()=>{},react:async()=>{},redact:async()=>{},create:async()=>{throw new Error('Тест: нет прав')},join:async()=>{}
+ edit:async()=>{},react:async()=>{},redact:async()=>{},create:async()=>{throw new Error('Тест: нет прав')},join:async()=>{},
+ encryptionStatus:async()=>encryption,enableEncryption:async()=>encryption={enabled:true,backupReady:false},
+ recoverEncryption:async key=>{window.__recoveryCount=(window.__recoveryCount||0)+1;if(key==='bad')throw new Error('Ключ не подходит');return encryption={enabled:true,backupReady:true}},
+ importEncryptionKeys:async()=>{encryption={enabled:true,backupReady:false};return 1},
+ folders:async()=>folders,saveFolders:async value=>{folders=value;localStorage.setItem('test-folders',JSON.stringify(value));return value},
+ searchUsers:async term=>({users:'Иван Иванов'.toLowerCase().includes(term.toLowerCase())?[{userId:'@ivan:test',displayName:'Иван Иванов'}]:[],limited:false}),
+ openDirect:async userId=>{if(!rooms.some(r=>r.id==='!dm:test'))rooms.push({id:'!dm:test',name:'Иван Иванов',membership:'joined',encryption:'unencrypted',unread:0,members:2,lastBody:null,lastTs:0});return '!dm:test'}
 };
 export const onUpdate=async callback=>{updates.add(callback);return ()=>updates.delete(callback)};
 export const onConnection=async()=>()=>{};
@@ -101,4 +109,51 @@ test('switching rooms immediately preserves the current draft', async ({ page })
   await page.getByRole('button', { name: 'Открыть Закрытая комната' }).click();
   await page.getByRole('button', { name: 'Открыть Команда Matrix' }).click();
   await expect(page.getByRole('textbox', { name: 'Сообщение', exact: true })).toHaveValue('Мой черновик');
+});
+
+test('E2EE is optional and can be opened without a recovery prompt at login', async ({ page }) => {
+  await login(page);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Открыть Закрытая комната' }).click();
+  await page.getByRole('button', { name: 'Открыть зашифрованные комнаты', exact: true }).first().click();
+  await expect(page.getByRole('dialog', { name: 'Открыть зашифрованные комнаты' })).toBeVisible();
+  await page.getByRole('button', { name: 'Открыть доступные сообщения без ключа' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.message-list').getByText('Открытое сообщение E2EE')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Сообщение', exact: true })).toBeVisible();
+});
+
+test('a wrong recovery key shows a useful error and does not unlock rooms', async ({ page }) => {
+  await login(page);
+  await page.getByRole('button', { name: 'Открыть зашифрованные комнаты', exact: true }).first().click();
+  await page.getByLabel('Ключ или пароль хранилища Matrix').fill('bad');
+  await page.getByRole('button', { name: 'Восстановить по ключу' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Ключ не подходит');
+  await expect(page.getByLabel('Ключ или пароль хранилища Matrix')).toHaveValue('');
+});
+
+test('people can be found by display surname and opened as a direct chat', async ({ page }) => {
+  await login(page);
+  await page.getByRole('button', { name: 'Поиск пользователей', exact: true }).click();
+  await page.getByLabel('Имя, фамилия или Matrix ID').fill('Иванов');
+  await expect(page.getByText('@ivan:test', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Написать Иван Иванов' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.chat-heading h2')).toHaveText('Иван Иванов');
+});
+
+test('named folders filter chats and remain after reloading', async ({ page }) => {
+  await login(page);
+  await page.getByRole('button', { name: 'Настроить ПАПКИ' }).click();
+  await page.getByLabel('Новая папка', { exact: true }).fill('Работа');
+  await page.getByRole('checkbox', { name: 'Команда Matrix', exact: true }).check();
+  await page.getByRole('button', { name: 'Создать папку', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Изменить папку Работа' })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Закрыть', exact: true }).click();
+  await page.getByRole('button', { name: 'Работа', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Открыть Команда Matrix' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Открыть Закрытая комната' })).toHaveCount(0);
+  await login(page);
+  await expect(page.getByRole('button', { name: 'Работа', exact: true })).toBeVisible();
+  await page.screenshot({ path: 'test-results/folders-and-keys.png' });
 });

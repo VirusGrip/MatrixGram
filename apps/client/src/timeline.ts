@@ -15,6 +15,7 @@ export function mergeEvents(existing: MatrixEvent[], incoming: MatrixEvent[]): M
     const previous = map.get(event.event_id);
     // A later history page must never restore already redacted content.
     if (previous?.unsigned?.redacted_because && !event.unsigned?.redacted_because) continue;
+    if (event.type === 'm.room.encrypted' && previous?.type === 'm.room.message') continue;
     map.set(event.event_id, event);
   }
   return [...map.values()].sort((a, b) => a.origin_server_ts - b.origin_server_ts || a.event_id.localeCompare(b.event_id));
@@ -38,7 +39,7 @@ export function projectTimeline(events: MatrixEvent[]): Message[] {
     const encrypted = event.type === 'm.room.encrypted';
     messages.set(event.event_id, {
       id: event.event_id, sender: event.sender, ts: event.origin_server_ts,
-      body: encrypted ? 'Зашифрованное сообщение не поддерживается' : text(c.body) || 'Неподдерживаемое сообщение',
+      body: encrypted ? 'Ключ для этого сообщения пока не найден. Подключите ключи сбоку и обновите историю.' : text(c.body) || 'Неподдерживаемое сообщение',
       encrypted, deleted: redacted.has(event.event_id), edited: false,
       replyTo: text(object(rel['m.in_reply_to']).event_id) || undefined,
       reactions: [],

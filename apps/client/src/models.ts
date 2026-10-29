@@ -14,6 +14,10 @@ export interface MatrixEvent {
 }
 export interface TimelinePage { roomId: string; events: MatrixEvent[]; next: string | null }
 export interface Update { rooms: RoomSummary[]; timelines: TimelinePage[]; connection: string; error: string | null }
+export interface EncryptionStatus { enabled: boolean; backupReady: boolean }
+export interface ChatFolder { id: string; name: string; roomIds: string[]; unreadOnly: boolean }
+export interface DirectoryUser { userId: string; displayName: string }
+export interface UserSearchResult { users: DirectoryUser[]; limited: boolean }
 export interface Message {
   id: string; sender: string; ts: number; body: string; edited: boolean; deleted: boolean;
   encrypted: boolean; replyTo?: string; reactions: { key: string; count: number }[];

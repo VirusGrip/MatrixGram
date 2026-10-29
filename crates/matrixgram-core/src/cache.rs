@@ -17,7 +17,8 @@ impl Cache {
             CREATE TABLE IF NOT EXISTS drafts (room_id TEXT PRIMARY KEY, body TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS redactions (room_id TEXT NOT NULL, target TEXT NOT NULL, data TEXT NOT NULL,
               PRIMARY KEY(room_id,target));
-            PRAGMA user_version=1;")?;
+            CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, data TEXT NOT NULL);
+            PRAGMA user_version=2;")?;
         Ok(Self(Mutex::new(db)))
     }
 
@@ -113,6 +114,27 @@ impl Cache {
     pub fn save_draft(&self, room_id: &str, body: &str) -> Result<()> {
         self.0.lock().expect("cache mutex poisoned").execute(
             "INSERT INTO drafts(room_id,body) VALUES(?1,?2) ON CONFLICT(room_id) DO UPDATE SET body=excluded.body", params![room_id, body])?;
+        Ok(())
+    }
+
+    pub fn setting<T: serde::de::DeserializeOwned + Default>(&self, key: &str) -> Result<T> {
+        use rusqlite::OptionalExtension;
+        let db = self.0.lock().expect("cache mutex poisoned");
+        let value: Option<String> = db
+            .query_row("SELECT data FROM settings WHERE key=?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        Ok(match value {
+            Some(value) => serde_json::from_str(&value)?,
+            None => T::default(),
+        })
+    }
+
+    pub fn save_setting<T: serde::Serialize>(&self, key: &str, value: &T) -> Result<()> {
+        self.0.lock().expect("cache mutex poisoned").execute(
+            "INSERT INTO settings(key,data) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
+            params![key, serde_json::to_string(value)?])?;
         Ok(())
     }
 }

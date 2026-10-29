@@ -23,7 +23,7 @@ pub fn allow_plaintext(encryption: &str) -> Result<()> {
     match encryption {
         "unencrypted" => Ok(()),
         "encrypted" => Err(CoreError::User(
-            "Зашифрованные комнаты не поддерживаются MatrixGram".into(),
+            "Откройте зашифрованные комнаты кнопкой сбоку, чтобы использовать E2EE".into(),
         )),
         _ => Err(CoreError::User(
             "Состояние шифрования не подтверждено. Отправка заблокирована.".into(),

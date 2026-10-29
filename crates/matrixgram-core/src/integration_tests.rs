@@ -50,6 +50,21 @@ async fn fixture(encrypted: bool) -> Fixture {
         .respond_with(ResponseTemplate::new(200).set_body_json(sync_response(encrypted)))
         .mount(&server)
         .await;
+    Mock::given(method("POST"))
+        .and(path("/_matrix/client/v3/keys/upload"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"one_time_key_counts":{"signed_curve25519":50}})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/_matrix/client/v3/keys/query"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"device_keys":{},"failures":{}})),
+        )
+        .mount(&server)
+        .await;
     let dir = tempfile::tempdir().unwrap();
     let store = dir.path().join("sdk");
     // HTTP is permitted only inside this test fixture, never through login IPC.
@@ -226,6 +241,7 @@ async fn uncertain_encryption_state_is_not_treated_as_plaintext() {
 #[tokio::test]
 async fn pagination_passes_cursor_and_caches_response_without_duplicate_events() {
     let f = fixture(false).await;
+    unencrypted_state(&f.server).await;
     Mock::given(method("GET")).and(path_regex(r"/_matrix/client/v3/rooms/.*/messages$"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"start":"older","end":"oldest","chunk":[{"type":"m.room.message","event_id":"$old","sender":"@bob:example.org","origin_server_ts":5,"content":{"msgtype":"m.text","body":"earlier"}}],"state":[]})))
         .mount(&f.server).await;
@@ -251,6 +267,238 @@ async fn pagination_passes_cursor_and_caches_response_without_duplicate_events()
             .query_pairs()
             .any(|(k, v)| k == "from" && v == "older")
     );
+}
+
+#[tokio::test]
+async fn directory_search_uses_display_name_and_returns_full_user_ids() {
+    let f = fixture(false).await;
+    Mock::given(method("POST")).and(path("/_matrix/client/v3/user_directory/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"results":[{"user_id":"@ivan:example.org","display_name":"Иван Иванов"}],"limited":true}))).mount(&f.server).await;
+    let result = f.account.search_users("Иванов").await.unwrap();
+    assert_eq!(result.users[0].display_name, "Иван Иванов");
+    assert_eq!(result.users[0].user_id, "@ivan:example.org");
+    assert!(result.limited);
+    assert!(f.account.search_users("я").await.unwrap().users.is_empty());
+    let request = f
+        .server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.url.path().ends_with("/user_directory/search"))
+        .unwrap();
+    assert_eq!(
+        request.body_json::<Value>().unwrap()["search_term"],
+        "Иванов"
+    );
+}
+
+#[tokio::test]
+async fn opening_a_person_creates_one_unencrypted_direct_chat_and_reuses_it() {
+    let f = fixture(false).await;
+    Mock::given(method("POST"))
+        .and(path("/_matrix/client/v3/createRoom"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"room_id":"!dm:example.org"})),
+        )
+        .expect(1)
+        .mount(&f.server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path_regex(
+            r"/_matrix/client/v3/user/.*/account_data/m.direct$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&f.server)
+        .await;
+    assert_eq!(
+        f.account.open_direct("@ivan:example.org").await.unwrap(),
+        "!dm:example.org"
+    );
+    assert_eq!(
+        f.account.open_direct("@ivan:example.org").await.unwrap(),
+        "!dm:example.org"
+    );
+    let request = f
+        .server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.url.path().ends_with("/createRoom"))
+        .unwrap()
+        .body_json::<Value>()
+        .unwrap();
+    assert_eq!(request["is_direct"], true);
+    assert!(!request.to_string().contains("m.room.encryption"));
+}
+
+async fn encrypted_export() -> (String, Value) {
+    use matrix_sdk::ruma::{
+        device_id, events::room::message::RoomMessageEventContent, room_id, user_id,
+    };
+    let machine =
+        matrix_sdk_crypto::OlmMachine::new(user_id!("@bob:example.org"), device_id!("BOB")).await;
+    let room = room_id!("!test:example.org");
+    machine
+        .share_room_key(
+            room,
+            std::iter::empty(),
+            matrix_sdk_crypto::EncryptionSettings::default(),
+        )
+        .await
+        .unwrap();
+    let content = RoomMessageEventContent::text_plain("Секретное сообщение из Megolm");
+    let encrypted = machine.encrypt_room_event(room, content).await.unwrap();
+    let keys = machine
+        .store()
+        .export_room_keys(|session| session.room_id() == room)
+        .await
+        .unwrap();
+    assert!(!keys.is_empty());
+    let export = matrix_sdk_crypto::encrypt_room_key_export(&keys, "export-password", 1).unwrap();
+    (
+        export,
+        json!({"event_id":"$encrypted","sender":"@bob:example.org","room_id":room,"origin_server_ts":100,"type":"m.room.encrypted","content":encrypted.content}),
+    )
+}
+
+#[tokio::test]
+async fn encrypted_export_import_decrypts_real_megolm_history_without_plaintext_cache() {
+    let f = fixture(true).await;
+    let (export, encrypted) = encrypted_export().await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"/_matrix/client/v3/rooms/.*/messages$"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"start":"now","chunk":[encrypted],"state":[]})),
+        )
+        .mount(&f.server)
+        .await;
+    assert!(!f.account.encryption_status().await.enabled);
+    assert!(f.account.history("!test:example.org", None).await.is_err());
+    assert!(
+        f.account
+            .import_encryption_keys(export.clone(), "wrong-password".into())
+            .await
+            .is_err()
+    );
+    assert!(!f.account.encryption_status().await.enabled);
+    assert_eq!(
+        f.account
+            .import_encryption_keys(export, "export-password".into())
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(f.account.encryption_status().await.enabled);
+    let page = f.account.history("!test:example.org", None).await.unwrap();
+    assert_eq!(
+        page.events[0]["content"]["body"],
+        "Секретное сообщение из Megolm"
+    );
+    assert_eq!(page.events[0]["type"], "m.room.message");
+    assert!(
+        f.account
+            .cache
+            .events("!test:example.org")
+            .unwrap()
+            .is_empty()
+    );
+    assert!(f.account.cache.setting::<bool>("e2ee_enabled").unwrap());
+    f.account
+        .save_draft("!test:example.org", "private draft")
+        .unwrap();
+    assert!(
+        f.account
+            .cache
+            .draft("!test:example.org")
+            .unwrap()
+            .is_empty()
+    );
+    #[cfg(windows)]
+    assert_eq!(
+        f.account.draft("!test:example.org").unwrap(),
+        "private draft"
+    );
+}
+
+#[tokio::test]
+async fn enabled_e2ee_sends_ciphertext_instead_of_plaintext() {
+    let f = fixture(true).await;
+    f.account.enable_encryption().await.unwrap();
+    Mock::given(method("GET"))
+        .and(path_regex(
+            r"/_matrix/client/v3/rooms/.*/state/m.room.encryption/?$",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"algorithm":"m.megolm.v1.aes-sha2"})),
+        )
+        .mount(&f.server)
+        .await;
+    Mock::given(method("GET")).and(path_regex(r"/_matrix/client/v3/rooms/.*/members$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"chunk":[{"type":"m.room.member","state_key":"@alice:example.org","sender":"@alice:example.org","event_id":"$m","origin_server_ts":2,"content":{"membership":"join"}}]}))).mount(&f.server).await;
+    Mock::given(method("PUT"))
+        .and(path_regex(
+            r"/_matrix/client/v3/rooms/.*/send/m.room.encrypted/cipher-txn$",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"event_id":"$sent-encrypted"})),
+        )
+        .expect(1)
+        .mount(&f.server)
+        .await;
+    assert_eq!(
+        f.account
+            .send_text(
+                "!test:example.org",
+                "PRIVATE DO NOT LEAK",
+                "cipher-txn",
+                None
+            )
+            .await
+            .unwrap(),
+        "$sent-encrypted"
+    );
+    let requests = f.server.received_requests().await.unwrap();
+    let send = requests
+        .iter()
+        .find(|r| r.url.path().contains("/send/m.room.encrypted/"))
+        .unwrap();
+    let body = send.body_json::<Value>().unwrap();
+    assert_eq!(body["algorithm"], "m.megolm.v1.aes-sha2");
+    assert!(body["ciphertext"].is_string());
+    assert!(!String::from_utf8_lossy(&send.body).contains("PRIVATE DO NOT LEAK"));
+}
+
+#[tokio::test]
+async fn sdk_store_is_protected_by_its_passphrase() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("protected");
+    drop(
+        build_client("https://matrix.example.org", &path, "store-password")
+            .await
+            .unwrap(),
+    );
+    assert!(
+        build_client("https://matrix.example.org", &path, "wrong-password")
+            .await
+            .is_err()
+    );
+    assert!(
+        build_client("https://matrix.example.org", &path, "store-password")
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn legacy_session_format_loads_without_requiring_a_recovery_key() {
+    let f = fixture(false).await;
+    let value = json!({"homeserver":"https://matrix.example.org","store_id":uuid::Uuid::new_v4().to_string(),"session":f.account.client.matrix_auth().session().unwrap()});
+    let saved: SavedSession = serde_json::from_value(value).unwrap();
+    assert!(saved.store_passphrase.is_none());
+    assert!(!f.account.encryption_status().await.enabled);
 }
 
 #[tokio::test]

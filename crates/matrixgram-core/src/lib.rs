@@ -1,4 +1,5 @@
 pub mod cache;
+mod features;
 #[cfg(test)]
 mod integration_tests;
 pub mod models;
@@ -10,11 +11,13 @@ use matrix_sdk::{
     Client, Room, RoomState,
     authentication::matrix::MatrixSession,
     config::SyncSettings,
+    encryption::{BackupDownloadStrategy, EncryptionSettings},
+    room::MessagesOptions,
     ruma::{
         OwnedEventId, OwnedRoomId, RoomId, TransactionId,
         api::client::{
-            message::get_message_events, receipt::create_receipt::v3::ReceiptType,
-            room::create_room, state::get_state_event_for_key, voip::get_turn_server_info,
+            receipt::create_receipt::v3::ReceiptType, room::create_room,
+            state::get_state_event_for_key, voip::get_turn_server_info,
         },
         events::StateEventType,
         uint,
@@ -26,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
@@ -34,6 +38,8 @@ struct SavedSession {
     homeserver: String,
     store_id: String,
     session: MatrixSession,
+    #[serde(default)]
+    store_passphrase: Option<String>,
 }
 
 pub struct Account {
@@ -42,18 +48,27 @@ pub struct Account {
     pub info: SessionInfo,
     data_dir: PathBuf,
     sync_lock: tokio::sync::Mutex<()>,
+    e2ee_enabled: AtomicBool,
+    direct_lock: tokio::sync::Mutex<()>,
+    draft_lock: std::sync::Mutex<()>,
+    store_path: PathBuf,
 }
 
 fn install_tls() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
-async fn build_client(homeserver: &str, store_path: &Path) -> Result<Client> {
+async fn build_client(homeserver: &str, store_path: &Path, passphrase: &str) -> Result<Client> {
     install_tls();
     Client::builder()
         .homeserver_url(homeserver)
-        .sqlite_store(store_path, None)
-        .user_agent("MatrixGram/0.1.0")
+        .sqlite_store(store_path.join("sdk-e2ee-v1"), Some(passphrase))
+        .with_encryption_settings(EncryptionSettings {
+            auto_enable_cross_signing: false,
+            auto_enable_backups: false,
+            backup_download_strategy: BackupDownloadStrategy::Manual,
+        })
+        .user_agent("MatrixGram/0.2.0")
         .respect_login_well_known(false)
         .build()
         .await
@@ -74,7 +89,8 @@ impl Account {
         std::fs::create_dir_all(data_dir)?;
         let store_id = uuid::Uuid::new_v4().to_string();
         let store_path = data_dir.join("accounts").join(&store_id);
-        let client = build_client(&server, &store_path).await?;
+        let passphrase = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+        let client = build_client(&server, &store_path, &passphrase).await?;
         client.matrix_auth().login_username(username.trim(), password)
             .initial_device_display_name("MatrixGram")
             .send().await.map_err(|_| CoreError::User("Не удалось войти. Проверьте логин и пароль. Сервер должен поддерживать вход по паролю; SSO и дополнительные этапы пока не поддерживаются.".into()))?;
@@ -86,6 +102,7 @@ impl Account {
             homeserver: server.clone(),
             store_id,
             session,
+            store_passphrase: Some(passphrase),
         };
         let persisted = match vault::save(
             &data_dir.join("session.dpapi"),
@@ -104,12 +121,30 @@ impl Account {
         let Some(bytes) = vault::load(&data_dir.join("session.dpapi"))? else {
             return Ok(None);
         };
-        let saved: SavedSession = serde_json::from_slice(&bytes)?;
+        let mut saved: SavedSession = serde_json::from_slice(&bytes)?;
         validate_homeserver(&saved.homeserver)?;
         uuid::Uuid::parse_str(&saved.store_id)
             .map_err(|_| CoreError::User("Повреждён путь сессии".into()))?;
         let store_path = data_dir.join("accounts").join(&saved.store_id);
-        let client = build_client(&saved.homeserver, &store_path).await?;
+        // 0.1.0 had no crypto store. Keep its account folder and drafts, while
+        // recreating SDK state in a separate encrypted store for the SAME device.
+        if saved.store_passphrase.is_none() {
+            saved.store_passphrase =
+                Some(format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()));
+            vault::save(
+                &data_dir.join("session.dpapi"),
+                &serde_json::to_vec(&saved)?,
+            )?;
+        }
+        let client = build_client(
+            &saved.homeserver,
+            &store_path,
+            saved
+                .store_passphrase
+                .as_deref()
+                .expect("store key generated"),
+        )
+        .await?;
         client
             .matrix_auth()
             .restore_session(saved.session, Default::default())
@@ -143,12 +178,18 @@ impl Account {
             homeserver: server,
             persisted,
         };
+        let cache = Cache::open(&store_path.join("timeline.sqlite3"))?;
+        let e2ee_enabled = AtomicBool::new(cache.setting::<bool>("e2ee_enabled")?);
         Ok(Self {
             client,
             info,
-            cache: Cache::open(&store_path.join("timeline.sqlite3"))?,
+            cache,
             data_dir: data_dir.to_owned(),
             sync_lock: tokio::sync::Mutex::new(()),
+            e2ee_enabled,
+            direct_lock: tokio::sync::Mutex::new(()),
+            draft_lock: std::sync::Mutex::new(()),
+            store_path,
         })
     }
 
@@ -167,7 +208,7 @@ impl Account {
         if room.state() != RoomState::Joined {
             return Err(CoreError::User("Сначала вступите в комнату".into()));
         }
-        if room.encryption_state().is_encrypted() {
+        if room.encryption_state().is_encrypted() && !self.e2ee_enabled.load(Ordering::Acquire) {
             allow_plaintext("encrypted")?;
         }
         let request = get_state_event_for_key::v3::Request::new(
@@ -176,7 +217,20 @@ impl Account {
             String::new(),
         );
         match self.client.send(request).await {
-            Ok(_) => allow_plaintext("encrypted")?,
+            Ok(_) => {
+                if !self.e2ee_enabled.load(Ordering::Acquire) {
+                    allow_plaintext("encrypted")?;
+                }
+                // Refresh SDK state before its send path selects encryption.
+                room.request_encryption_state()
+                    .await
+                    .map_err(network_error)?;
+                if !room.encryption_state().is_encrypted() {
+                    return Err(CoreError::User(
+                        "Состояние шифрования изменилось. Дождитесь синхронизации комнаты.".into(),
+                    ));
+                }
+            }
             Err(error)
                 if error.client_api_error_kind()
                     == Some(&matrix_sdk::ruma::api::error::ErrorKind::NotFound) => {}
@@ -196,10 +250,18 @@ impl Account {
                 matrix_sdk::EncryptionState::NotEncrypted => "unencrypted",
                 _ => "unknown",
             };
-            let (last_body, last_ts) = self.cache.last_message(room.room_id().as_str())?;
+            let (last_body, last_ts) = if encryption == "encrypted" {
+                (None, 0)
+            } else {
+                self.cache.last_message(room.room_id().as_str())?
+            };
             result.push(RoomSummary {
                 id: room.room_id().to_string(),
-                name: room.name().unwrap_or_else(|| room.room_id().to_string()),
+                name: room
+                    .display_name()
+                    .await
+                    .map(|name| name.to_string())
+                    .unwrap_or_else(|_| room.room_id().to_string()),
                 topic: room.topic(),
                 membership: if room.state() == RoomState::Invited {
                     "invited"
@@ -241,13 +303,33 @@ impl Account {
             })?;
         let mut timelines = Vec::new();
         for (id, room) in response.rooms.joined {
+            let encrypted = self
+                .client
+                .get_room(&id)
+                .is_some_and(|r| r.encryption_state().is_encrypted())
+                || room.timeline.events.iter().any(|event| {
+                    event.encryption_info().is_some()
+                        || event
+                            .raw()
+                            .get_field::<String>("type")
+                            .ok()
+                            .flatten()
+                            .as_deref()
+                            == Some("m.room.encrypted")
+                });
+            if encrypted && !self.e2ee_enabled.load(Ordering::Acquire) {
+                continue;
+            }
             let events: Vec<Value> = room
                 .timeline
                 .events
                 .iter()
                 .filter_map(|event| serde_json::from_str(event.raw().json().get()).ok())
                 .collect();
-            self.cache.save_events(id.as_str(), &events)?;
+            // Decrypted E2EE content stays in memory; never write it to the plaintext UI cache.
+            if !encrypted {
+                self.cache.save_events(id.as_str(), &events)?;
+            }
             if !events.is_empty() {
                 timelines.push(TimelinePage {
                     room_id: id.to_string(),
@@ -266,25 +348,61 @@ impl Account {
 
     pub async fn history(&self, room_id: &str, from: Option<String>) -> Result<TimelinePage> {
         let room = self.room(room_id)?;
-        let mut request = get_message_events::v3::Request::new(
-            room.room_id().to_owned(),
-            matrix_sdk::ruma::api::Direction::Backward,
-        );
-        request.from = from;
-        request.limit = uint!(50);
-        let response = self.client.send(request).await.map_err(network_error)?;
+        let encrypted = room
+            .latest_encryption_state()
+            .await
+            .map_err(network_error)?
+            .is_encrypted();
+        if encrypted && !self.e2ee_enabled.load(Ordering::Acquire) {
+            allow_plaintext("encrypted")?;
+        }
+        if encrypted && self.client.encryption().backups().are_enabled().await {
+            let _ = self
+                .client
+                .encryption()
+                .backups()
+                .download_room_keys_for_room(room.room_id())
+                .await;
+        }
+        let mut options = MessagesOptions::backward();
+        options.from = from;
+        options.limit = uint!(50);
+        let response = room.messages(options).await.map_err(network_error)?;
+        let encrypted = encrypted
+            || response.chunk.iter().any(|event| {
+                event.encryption_info().is_some()
+                    || event
+                        .raw()
+                        .get_field::<String>("type")
+                        .ok()
+                        .flatten()
+                        .as_deref()
+                        == Some("m.room.encrypted")
+            });
+        if encrypted && !self.e2ee_enabled.load(Ordering::Acquire) {
+            allow_plaintext("encrypted")?;
+        }
         let mut events = response
             .chunk
             .iter()
-            .filter_map(|event| serde_json::from_str(event.json().get()).ok())
+            .filter_map(|event| serde_json::from_str(event.raw().json().get()).ok())
             .collect::<Vec<Value>>();
         events.reverse();
-        self.cache.save_events(room_id, &events)?;
+        if !encrypted {
+            self.cache.save_events(room_id, &events)?;
+        }
         Ok(TimelinePage {
             room_id: room_id.into(),
             events,
             next: response.end,
         })
+    }
+
+    pub fn cached_timeline(&self, room_id: &str) -> Result<Vec<Value>> {
+        if self.room(room_id)?.encryption_state().is_encrypted() {
+            return Ok(vec![]);
+        }
+        self.cache.events(room_id)
     }
 
     pub async fn send_text(
