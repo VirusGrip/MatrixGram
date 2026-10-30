@@ -3065,7 +3065,7 @@ dependencies = [
 
 [[package]]
 name = "matrixgram"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "matrixgram-core",
  "serde",
@@ -3077,7 +3077,7 @@ dependencies = [
 
 [[package]]
 name = "matrixgram-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "matrix-sdk",
  "matrix-sdk-crypto",

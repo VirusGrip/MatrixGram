@@ -1,4 +1,4 @@
-# Matrix API 0.2.0
+# Matrix API 0.3.0
 
 Все запросы идут через Rust SDK с текущей Matrix-сессией. SDK выбирает доступные версии endpoint; wiremock проверяет пути v3. Admin API Synapse и Telegram API не используются.
 

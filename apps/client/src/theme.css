@@ -1,2 +1,22 @@
-:root{color-scheme:light;--accent:#269ed2;--accent-soft:#e9f5fb;--text:#263a4d;--muted:#8a9aa9;--surface:#fff;--input:#f3f6f8;--line:#eaf0f3;--hover:#f2f7fa;--selected:#eaf5fc;--rail:#172b3e;--chat-bg:#eff4f7;--bubble:#fff;--mine:#dcf0fc;--mine-meta:#7aadc7;--quote:#92bfdb19;--danger:#d45f65;--notice:#f3f7fa;--login:#f8fbfd;--dot:#d5e0e8;--date:#e1eaf0;--scroll:#c1cdd566}
-:root[data-theme=dark]{color-scheme:dark;--accent:#54afe0;--accent-soft:#244355;--text:#dfeaf3;--muted:#8194a6;--surface:#1c2b39;--input:#16232f;--line:#2a3b4a;--hover:#263949;--selected:#25455b;--rail:#121f2a;--chat-bg:#152430;--bubble:#243746;--mine:#28546f;--mine-meta:#8fb5cd;--quote:#a2d3f018;--danger:#ed8588;--notice:#243543;--login:#152430;--dot:#293c48;--date:#263c4b;--scroll:#61768955}
+:root {
+  color-scheme: light;
+  --accent: #3390ec; --accent-soft: #e8f3ff;
+  --text: #182533; --muted: #8393a3;
+  --surface: #ffffff; --input: #f1f1f1; --line: #e7ebee;
+  --hover: #f1f3f5; --selected: #4194d6; --selected-text: #fff; --selected-muted: #e0f0ff;
+  --rail: #293a4c; --chat-bg: #dbe5db;
+  --bubble: #ffffff; --mine: #e3ffc9; --mine-meta: #6b9d55;
+  --quote: #76b9db20; --danger: #d45f65; --notice: #f3f7fa;
+  --login: #f8fbfd; --dot: #d5e0e8; --date: #81948266; --date-text: #fff; --scroll: #81919e66;
+}
+:root[data-theme=dark] {
+  color-scheme: dark;
+  --accent: #64b5ef; --accent-soft: #263e52;
+  --text: #f1f3f5; --muted: #7f96aa;
+  --surface: #17212b; --input: #242f3d; --line: #101923;
+  --hover: #202d3b; --selected: #2b5278; --selected-text: #fff; --selected-muted: #d8e9fa;
+  --rail: #202c3a; --chat-bg: #0e1621;
+  --bubble: #182533; --mine: #2b5278; --mine-meta: #80b8e0;
+  --quote: #80b8e025; --danger: #ed8588; --notice: #233343;
+  --login: #0e1621; --dot: #293c48; --date: #1d2c3b; --date-text: #b4c7d7; --scroll: #60738666;
+}

@@ -1,4 +1,4 @@
-# Архитектура 0.2.0
+# Архитектура 0.3.0
 
 ```mermaid
 flowchart LR
@@ -27,7 +27,7 @@ flowchart LR
 - settings содержит folders, e2ee_enabled и локальное соответствие личных комнат пользователям. Папки относятся к текущей локальной сессии аккаунта, синхронизации между устройствами нет.
 - `accounts/{uuid}/private-drafts/{uuid}` — DPAPI-черновики известных E2EE-комнат на Windows.
 - `session.dpapi` — Matrix-сессия и пароль SDK store. Старая сессия 0.1.0 сохраняет device ID и получает новый SDK store без удаления прежнего кеша.
-- LocalStorage — только тема и закреплённые чаты, без токена, recovery key или паролей.
+- LocalStorage — тема, ширина списка и закреплённые чаты, без токена, recovery key или паролей.
 
 Список комнат и сообщения виртуализированы. Проекция проверяет входные поля, авторство правок, реакции и redaction. HTML остаётся текстом. Расшифрованное событие не заменяется старой копией ciphertext из истории.
 
@@ -36,3 +36,5 @@ flowchart LR
 ## Источники API
 
 [Matrix SDK 0.19.1 features](https://docs.rs/crate/matrix-sdk/0.19.1/features), [Recovery API](https://docs.rs/matrix-sdk/0.19.1/matrix_sdk/encryption/recovery/struct.Recovery.html), [Matrix Client-Server API](https://spec.matrix.org/latest/client-server-api/), [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). Точные зависимости зафиксированы в Cargo.lock и package-lock.json.
+
+Вёрстка 0.3.0 описана в [UI.md](UI.md). Изменение оформления не меняет формат сессии, SDK store, кеша и папок.

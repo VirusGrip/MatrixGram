@@ -68,7 +68,7 @@ async fn build_client(homeserver: &str, store_path: &Path, passphrase: &str) -> 
             auto_enable_backups: false,
             backup_download_strategy: BackupDownloadStrategy::Manual,
         })
-        .user_agent("MatrixGram/0.2.0")
+        .user_agent("MatrixGram/0.3.0")
         .respect_login_well_known(false)
         .build()
         .await

@@ -14,7 +14,7 @@ let drafts = {};
 let encryption = {enabled:false,backupReady:false};
 let folders = JSON.parse(localStorage.getItem('test-folders') || '[]');
 export const api = {
- bootstrap:async()=>null, login:async()=>session, rooms:async()=>rooms, logout:async()=>{}, forget:async()=>{},
+ bootstrap:async()=>null, login:async()=>{setTimeout(()=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[],connection:'online',error:null})),30);return session}, rooms:async()=>rooms, logout:async()=>{}, forget:async()=>{},
  cached:async id=>id==='!plain:test'?events:[], history:async id=>{if(id==='!secret:test')window.__secretHistoryCount=(window.__secretHistoryCount||0)+1;return {roomId:id,events:id==='!plain:test'?events:id==='!secret:test'&&encryption.enabled?[{event_id:'$secret',sender:'@bob:test',type:'m.room.message',origin_server_ts:2000,content:{body:'Открытое сообщение E2EE'}}]:[],next:null}},
  draft:async id=>drafts[id]||'',saveDraft:async(id,body)=>{drafts[id]=body},typing:async()=>{},read:async()=>{},
  send:async(roomId,body,txn,replyTo)=>{
@@ -38,13 +38,13 @@ export const onUpdate=async callback=>{updates.add(callback);return ()=>updates.
 export const onConnection=async()=>()=>{};
 `;
 
-async function login(page: Page) {
-  await page.route('**/src/api.ts', route => route.fulfill({ contentType: 'text/javascript', body: fixtureApi }));
+async function login(page: Page, adapter = fixtureApi) {
+  await page.route('**/src/api.ts', route => route.fulfill({ contentType: 'text/javascript', body: adapter }));
   await page.goto('/');
   await page.getByLabel('Логин или Matrix ID').fill('alice');
   await page.getByLabel('Пароль', { exact: true }).fill('test-password');
   await page.getByRole('button', { name: 'Войти в MatrixGram' }).click();
-  await expect(page.getByRole('heading', { name: 'Сообщения.' })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Чаты', exact: true })).toBeVisible();
 }
 
 test('web-only shell clearly explains why login is unavailable', async ({ page }) => {
@@ -156,4 +156,81 @@ test('named folders filter chats and remain after reloading', async ({ page }) =
   await login(page);
   await expect(page.getByRole('button', { name: 'Работа', exact: true })).toBeVisible();
   await page.screenshot({ path: 'test-results/folders-and-keys.png' });
+});
+
+const conversation = [
+  ['@bob:test', 'Привет! Как продвигается новый интерфейс?'],
+  ['@bob:test', 'Посмотрел свежую сборку. Стало заметно удобнее.'],
+  ['@alice:test', 'Привет! Уже собираю версию для Windows.'],
+  ['@alice:test', 'Папки теперь слева, а поиск всегда под рукой.'],
+  ['@carol:test', 'Отлично. Вечером проверю на ноутбуке.'],
+  ['@bob:test', 'И короткая переписка больше не висит вверху 🙂'],
+  ['@bob:test', 'Спасибо!'],
+];
+function withMessages(items: string[][]) {
+  const events = items.map(([sender, body], index) => ({ event_id: `$visual${index}`, sender, type: 'm.room.message', origin_server_ts: new Date(2026, 9, 30, 12, 0).getTime() + index * 30_000, content: { msgtype: 'm.text', body } }));
+  const extraRooms = ['Дизайн', 'Семья', 'Общий чат', 'Планы на выходные', 'Разработка', 'Музыка', 'Заметки', 'Книжный клуб'].map((name, index) => ({ id: `!visual${index}:test`, name, topic: null, membership: 'joined', encryption: 'unencrypted', unread: index === 2 ? 4 : 0, members: 3, lastBody: ['До встречи вечером!', 'Спасибо, всё получилось', 'Посмотрю чуть позже'][index % 3], lastTs: new Date(2026, 9, 30, 11, 40 - index * 3).getTime() }));
+  return fixtureApi.replace(/let events = .*?;/, `let events = ${JSON.stringify(events)};`).replace('const updates = new Set();', `rooms.push(...${JSON.stringify(extraRooms)}); const updates = new Set();`);
+}
+
+test('compact conversation groups senders, sits at the bottom, and opens details on demand', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('matrixgram.theme', 'dark');
+    localStorage.setItem('test-folders', JSON.stringify([{ id: 'work', name: 'Работа', roomIds: ['!plain:test'], unreadOnly: false }, { id: 'personal', name: 'Личное', roomIds: ['!secret:test'], unreadOnly: false }]));
+  });
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await login(page, withMessages(conversation));
+  await page.getByRole('button', { name: 'Открыть Команда Matrix' }).click();
+  await expect(page.locator('.message-list .bubble')).toHaveCount(7);
+  await expect(page.locator('.message-list .sender')).toHaveCount(3);
+  await expect(page.locator('.message-avatar .avatar')).toHaveCount(3);
+  await expect(page.locator('.details')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Работа', exact: true })).toBeVisible();
+  const last = page.locator('.message-slot').last();
+  await expect.poll(async () => {
+    const bubble = await last.boundingBox(), composer = await page.locator('.composer').boundingBox();
+    return composer!.y - bubble!.y - bubble!.height;
+  }).toBeLessThan(20);
+  const first = await page.locator('.message-slot').nth(0).boundingBox(), second = await page.locator('.message-slot').nth(1).boundingBox();
+  expect(second!.y - first!.y - first!.height).toBeLessThan(2);
+  await page.screenshot({ path: 'test-results/telegram-desktop.png' });
+  await page.getByRole('button', { name: 'О чате Команда Matrix', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'О комнате', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Скрыть информацию' }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  await page.screenshot({ path: 'test-results/telegram-mobile.png' });
+  await page.setViewportSize({ width: 1280, height: 820 });
+  await page.getByRole('button', { name: 'Сменить тему' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.screenshot({ path: 'test-results/telegram-light.png' });
+  expect(errors).toEqual([]);
+});
+
+test('chat column can be resized with pointer and keyboard and keeps its width', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page);
+  const separator = page.getByRole('separator', { name: 'Ширина списка чатов' });
+  const box = await separator.boundingBox();
+  await page.mouse.move(box!.x + box!.width / 2, 300);
+  await page.mouse.down(); await page.mouse.move(box!.x + box!.width / 2 + 80, 300); await page.mouse.up();
+  await expect(separator).toHaveAttribute('aria-valuenow', '460');
+  await separator.focus(); await page.keyboard.press('ArrowRight');
+  await expect(separator).toHaveAttribute('aria-valuenow', '480');
+  await login(page);
+  await expect(separator).toHaveAttribute('aria-valuenow', '480');
+});
+
+test('long history remains virtualized and can scroll from newest to oldest', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 820 });
+  const items = Array.from({ length: 180 }, (_, index) => ['@bob:test', `Сообщение ${index + 1}: ${'Проверяем перенос текста. '.repeat(index % 4 + 1)}`]);
+  await login(page, withMessages(items));
+  await page.getByRole('button', { name: 'Открыть Команда Matrix' }).click();
+  await expect(page.locator('.message-text').filter({ hasText: 'Сообщение 180:' })).toBeVisible();
+  expect(await page.locator('.message-list .bubble').count()).toBeLessThan(70);
+  await page.locator('.timeline').evaluate(element => { element.scrollTop = 0; element.dispatchEvent(new Event('scroll')); });
+  await expect(page.locator('.message-text').filter({ hasText: 'Сообщение 1:' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(1280);
 });

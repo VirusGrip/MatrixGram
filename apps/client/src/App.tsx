@@ -1,12 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowLeft, Check, CheckCheck, CircleAlert, Folder, Hash, Info, KeyRound, LockKeyhole, LogOut, MessageCircle, Moon, Pencil, Pin, Plus, Reply, Search, Send, Settings, ShieldOff, Sun, Trash2, Users, Wifi, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, Check, CheckCheck, CircleAlert, Folder, Hash, Info, KeyRound, LockKeyhole, LogOut, Menu, MessageCircle, Moon, Pencil, Pin, Plus, Reply, Search, Send, ShieldOff, Sun, Trash2, Users, WifiOff, X } from 'lucide-react';
 import { api, nativeAvailable, onConnection, onUpdate } from './api';
 import { useStore } from './store';
 import { projectTimeline } from './timeline';
 import type { Message, RoomSummary } from './models';
 import { Avatar, Modal } from './ui';
 import { EncryptionDialog, FolderManager, PeopleSearch } from './SidebarFeatures';
+import { memberLabel, sameMessageGroup } from './presentation';
 const time = (ts: number) => new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 const date = (ts: number) => new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 
@@ -44,13 +45,13 @@ function Login({ loading }: { loading: boolean }) {
       {error && !loading && <button className="text-button" onClick={() => { void api.forget().then(() => useStore.getState().setError(null)).catch(e => useStore.getState().setError(e)); }}>Сбросить сохранённую сессию на этом устройстве</button>}
       <p className="login-note"><KeyRound size={17}/>Зашифрованные комнаты можно открыть после входа.<br/>Восстановление ключей необязательно.</p>
     </section>
-    <footer>MatrixGram · 0.2.0 · ранняя версия</footer>
+    <footer>MatrixGram · 0.3.0 · ранняя версия</footer>
   </main>;
 }
 
 function RoomList({ rooms, selected, pins, select, togglePin }: { rooms: RoomSummary[]; selected: string | null; pins: string[]; select: (id: string) => void; togglePin: (id: string) => void }) {
   const parent = useRef<HTMLDivElement>(null);
-  const rows = useVirtualizer({ count: rooms.length, getScrollElement: () => parent.current, estimateSize: () => 82, overscan: 6 });
+  const rows = useVirtualizer({ count: rooms.length, getScrollElement: () => parent.current, estimateSize: () => 68, overscan: 6 });
   return <div className="room-list" ref={parent} aria-label="Список чатов">
     {!rooms.length && <div className="list-empty"><MessageCircle size={30}/><p>Здесь появятся ваши чаты</p><small>Дождитесь синхронизации или создайте комнату</small></div>}
     <div style={{ height: rows.getTotalSize(), position: 'relative' }}>
@@ -116,7 +117,10 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
   const draftReady = useRef(false), draftBody = useRef(''), editing = useRef(false), scroll = useRef<HTMLDivElement>(null), stick = useRef(true), initialScroll = useRef(true), typingAt = useRef(0);
   draftBody.current = body; editing.current = edit !== null;
   const filtered = useMemo(() => messages.filter(m => !find || m.body.toLocaleLowerCase().includes(find.toLocaleLowerCase())), [messages, find]);
-  const rows = useVirtualizer({ count: filtered.length, getScrollElement: () => scroll.current, estimateSize: () => 102, overscan: 10, getItemKey: i => filtered[i].id });
+  const list = useRef<HTMLDivElement>(null);
+  const [listOffset, setListOffset] = useState(0);
+  const rows = useVirtualizer({ count: filtered.length, getScrollElement: () => scroll.current, estimateSize: () => 58, overscan: 10, getItemKey: i => filtered[i].id, scrollMargin: listOffset });
+  const totalSize = rows.getTotalSize();
   const e2eeEnabled = useStore(s => s.encryption.enabled);
   const blocked = room.encryption === 'encrypted' && !e2eeEnabled;
 
@@ -136,10 +140,19 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
     return () => window.clearTimeout(timer);
   }, [room.id, body, edit]);
   useLayoutEffect(() => {
+    if (!scroll.current || !list.current) return;
+    const viewport = scroll.current, element = list.current;
+    const measure = () => setListOffset(Math.round(element.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop));
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport); observer.observe(element); measure();
+    return () => observer.disconnect();
+  }, [blocked, room.membership]);
+  useLayoutEffect(() => {
     if (!filtered.length || (!stick.current && !initialScroll.current)) return;
-    requestAnimationFrame(() => rows.scrollToIndex(filtered.length - 1, { align: 'end' }));
+    const frame = requestAnimationFrame(() => { if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; });
     initialScroll.current = false;
-  }, [filtered.length, rows]);
+    return () => cancelAnimationFrame(frame);
+  }, [filtered.length, totalSize, listOffset, pending.length]);
   useEffect(() => {
     const last = messages.at(-1);
     if (!blocked && last && stick.current && document.visibilityState === 'visible') void api.read(room.id, last.id).catch(() => {});
@@ -171,7 +184,7 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
   return <section className="chat-panel">
     <header className="chat-header">
       <button className="icon-button back-button" aria-label="Назад к чатам" onClick={() => useStore.getState().select(null)}><ArrowLeft/></button>
-      <Avatar name={room.name} size="small"/><div className="chat-heading"><h2>{room.name}</h2><span>{room.membership === 'invited' ? 'Вас пригласили' : `${room.members} участников`} · {room.encryption === 'encrypted' ? 'Сквозное шифрование' : 'Matrix'}</span></div>
+      <button className="chat-heading" onClick={toggleInfo} aria-label={`О чате ${room.name}`}><h2>{room.name}</h2><span>{room.membership === 'invited' ? 'Вас пригласили' : memberLabel(room.members) || (room.encryption === 'encrypted' ? 'Зашифрованная переписка' : 'Переписка')}</span></button>
       {room.encryption === 'encrypted' && <button className="icon-button" aria-label="Ключи комнаты" onClick={openEncryption}><KeyRound size={20}/></button>}
       <button className="icon-button" aria-label="Поиск в загруженных сообщениях" onClick={() => setSearchOpen(!searchOpen)}><Search size={21}/></button>
       <button className={`icon-button ${showInfo ? 'accent' : ''}`} aria-label="Информация о комнате" onClick={toggleInfo}><Info size={21}/></button>
@@ -179,19 +192,24 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
     {searchOpen && <div className="chat-search"><Search size={17}/><input autoFocus placeholder="Поиск в загруженной истории" value={find} onChange={e => setFind(e.target.value)}/><button className="icon-button" aria-label="Закрыть поиск" onClick={() => { setSearchOpen(false); setFind(''); }}><X size={18}/></button></div>}
     {room.membership === 'invited' ? <div className="chat-state"><Users size={42}/><h2>Приглашение в комнату</h2><p>{room.name}</p><button className="primary" onClick={() => { void api.join(room.id).then(async () => useStore.setState({ rooms: await api.rooms() })).catch(e => useStore.getState().setError(e)); }}>Вступить</button></div> : blocked ? <div className="chat-state"><LockKeyhole size={44}/><h2>Зашифрованная комната</h2><p>Откройте доступные сообщения сейчас.<br/>Ключи для старой истории можно подключить позже.</p><button className="primary" onClick={openEncryption}>Открыть зашифрованные комнаты</button></div> : <>
       <div className="timeline" ref={scroll} onScroll={() => { const el = scroll.current; if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120; }} aria-label="Сообщения">
+        <div className="timeline-content">
         <div className="history-control"><button className="text-button" disabled={loading || cursor === null} onClick={() => { void older(); }}>{loading ? 'Загружаем историю…' : cursor === null ? 'Начало доступной истории' : 'Загрузить более ранние'}</button></div>
         {!messages.length && !loading && <div className="chat-state small-state"><MessageCircle size={38}/><p>Начните разговор</p></div>}
-        <div className="message-list" style={{ height: rows.getTotalSize() }}>
+        <div className="message-list" ref={list} style={{ height: totalSize }}>
           {rows.getVirtualItems().map(row => {
             const message = filtered[row.index], previous = filtered[row.index - 1];
             const mine = message.sender === session.userId;
-            return <div ref={rows.measureElement} data-index={row.index} key={message.id} className="message-slot" style={{ transform: `translateY(${row.start}px)` }}>
+            const joinsPrevious = sameMessageGroup(previous, message);
+            const joinsNext = sameMessageGroup(message, filtered[row.index + 1]);
+            const sender = message.sender.split(':')[0].replace('@', '');
+            return <div ref={rows.measureElement} data-index={row.index} key={message.id} className={`message-slot ${joinsPrevious ? 'group-continuation' : 'group-start'}`} style={{ transform: `translateY(${row.start - listOffset}px)` }}>
               {(!previous || date(previous.ts) !== date(message.ts)) && <div className="date-divider"><span>{date(message.ts)}</span></div>}
+              <div className={`message-row ${mine ? 'outgoing' : 'incoming'} ${joinsNext ? '' : 'group-end'}`}>
+              {!mine && <span className="message-avatar">{!joinsNext && <Avatar name={sender} size="tiny"/>}</span>}
               <article className={`bubble ${mine ? 'mine' : ''} ${message.deleted ? 'deleted' : ''}`} aria-label={`Сообщение от ${message.sender}`}>
-                {!mine && <strong className="sender">{message.sender.split(':')[0].replace('@', '')}</strong>}
+                {!mine && !joinsPrevious && <strong className="sender">{sender}</strong>}
                 {message.replyTo && <blockquote>{messages.find(m => m.id === message.replyTo)?.body ?? 'Ответ на более раннее сообщение'}</blockquote>}
-                <p>{message.body}</p>
-                <span className="message-meta">{message.edited && 'изменено · '}{time(message.ts)}{mine && <Check size={13}/>}</span>
+                <p><span className="message-text">{message.body}</span><span className="message-meta">{message.edited && 'изменено · '}{time(message.ts)}{mine && <Check size={14} aria-label="Отправлено на сервер"/>}</span></p>
                 {message.reactions.length > 0 && <div className="reactions">{message.reactions.map(r => <span key={r.key}>{r.key} {r.count}</span>)}</div>}
                 {!message.deleted && !message.encrypted && <div className="message-actions">
                   <button title="Ответить" aria-label="Ответить" onClick={() => { setReply(message); setEdit(null); }}><Reply size={15}/></button>
@@ -199,10 +217,12 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
                   {mine && <><button title="Редактировать" aria-label="Редактировать" onClick={() => { setEdit(message); setReply(null); setBody(message.body); }}><Pencil size={14}/></button><button title="Удалить" aria-label="Удалить" onClick={() => setDeleting(message)}><Trash2 size={14}/></button></>}
                 </div>}
               </article>
+              </div>
             </div>;
           })}
         </div>
         {pending.map(p => <div className="pending-wrap" key={p.txn}><div className="bubble mine pending"><p>{p.body}</p><span className="message-meta">{p.status === 'failed' ? 'Не отправлено' : p.status === 'sent' ? <><CheckCheck size={13}/>На сервере, ждём синхронизации</> : 'Отправляем…'}</span>{p.status === 'failed' && <button className="text-button" onClick={() => { void useStore.getState().send(p.roomId, p.body, p.replyTo, p.txn).then(success => { if (success) { setBody(current => current === p.body ? '' : current); stick.current = true; } }); }}>Повторить</button>}</div></div>)}
+        </div>
       </div>
       {(reply || edit) && <div className="composer-context"><Reply size={20}/><span><strong>{edit ? 'Редактирование' : 'Ответ'}</strong><small>{(edit ?? reply)?.body}</small></span><button className="icon-button" aria-label="Отменить ответ или редактирование" onClick={() => { if (edit) setBody(''); setEdit(null); setReply(null); }}><X size={17}/></button></div>}
       <form className="composer" onSubmit={submit}>
@@ -212,7 +232,6 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
         }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(e); } }}/>
         <button type="submit" className="send-button" aria-label={edit ? 'Сохранить изменение' : 'Отправить'} disabled={!body.trim() || sending}>{edit ? <Check size={21}/> : <Send size={21}/>}</button>
       </form>
-      <div className="composer-hint">Enter — отправить · Shift + Enter — новая строка</div>
     </>}
     {deleting && <Modal title="Удалить сообщение?" close={() => setDeleting(null)}><p>Сообщение будет удалено для участников комнаты через Matrix.</p><div className="modal-actions"><button className="text-button" onClick={() => setDeleting(null)}>Отмена</button><button className="danger" onClick={() => { void api.redact(room.id, deleting.id).then(() => setDeleting(null)).catch(e => useStore.getState().setError(e)); }}>Удалить</button></div></Modal>}
   </section>;
@@ -221,11 +240,20 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
 export default function App() {
   const session = useStore(s => s.session), rooms = useStore(s => s.rooms), activeRoom = useStore(s => s.activeRoom), error = useStore(s => s.error), connection = useStore(s => s.connection);
   const [booting, setBooting] = useState(nativeAvailable()), [search, setSearch] = useState(''), [tab, setTab] = useState('all');
-  const [creating, setCreating] = useState(false), [settings, setSettings] = useState(false), [info, setInfo] = useState(window.innerWidth >= 1200);
+  const [creating, setCreating] = useState(false), [settings, setSettings] = useState(false), [info, setInfo] = useState(false);
   const [theme, setThemeValue] = useState(localStorage.getItem('matrixgram.theme') ?? 'light');
   const [pins, setPins] = useState<string[]>([]);
   const [peopleOpen, setPeopleOpen] = useState(false), [foldersOpen, setFoldersOpen] = useState(false), [encryptionOpen, setEncryptionOpen] = useState(false);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const stored = Number(localStorage.getItem('matrixgram.sidebarWidth'));
+    return Number.isFinite(stored) && stored >= 280 && stored <= 640 ? stored : 380;
+  });
+  const resizeStart = useRef<{ x: number; width: number } | null>(null);
+  const resizeSidebar = (value: number) => {
+    const width = Math.max(280, Math.min(640, value));
+    setSidebarWidth(width); localStorage.setItem('matrixgram.sidebarWidth', String(width));
+  };
   const folders = useStore(s => s.folders), encryption = useStore(s => s.encryption);
   const pinKey = `matrixgram.pins.${session?.homeserver}.${session?.userId}`;
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('matrixgram.theme', theme); }, [theme]);
@@ -254,18 +282,34 @@ export default function App() {
   }, [rooms, search, tab, pins, folders, activeFolder]);
   if (!session) return <Login loading={booting}/>;
   function togglePin(id: string) { const value = pins.includes(id) ? pins.filter(p => p !== id) : [...pins, id]; setPins(value); localStorage.setItem(pinKey, JSON.stringify(value)); }
-  return <main className={`app-shell ${activeRoom ? 'has-active' : ''} ${info && room ? 'with-info' : ''}`}>
-    <nav className="rail" aria-label="Главное меню"><div className="rail-brand"><Send size={25}/></div><button className="rail-button active" aria-label="Все чаты" onClick={() => { setTab('all'); setActiveFolder(null); }}><MessageCircle size={23}/><span>Чаты</span></button><button className="rail-button" onClick={() => setFoldersOpen(true)} aria-label="Управление папками"><Folder size={23}/><span>ПАПКИ</span></button><div className="rail-spacer"/><button className="rail-button" aria-label="Сменить тему" onClick={() => setThemeValue(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? <Moon size={21}/> : <Sun size={21}/>}</button><button className="rail-button" aria-label="Настройки" onClick={() => setSettings(true)}><Settings size={22}/></button><Avatar name={session.userId} size="tiny"/></nav>
-    <aside className="sidebar"><header className="sidebar-heading"><div><span className="eyebrow">MATRIXGRAM</span><h1>Сообщения<span>.</span></h1></div><button className="icon-button new-room" aria-label="Новая комната" onClick={() => setCreating(true)}><Plus size={23}/></button><button className="icon-button mobile-settings" aria-label="Настройки" onClick={() => setSettings(true)}><Settings size={20}/></button></header>
-      <div className="search-with-people"><label className="search-field"><Search size={18}/><input placeholder="Найти чат" value={search} onChange={e => setSearch(e.target.value)} aria-label="Найти чат"/></label><button className="icon-button" aria-label="Поиск пользователей" title="Поиск людей по имени" onClick={() => setPeopleOpen(true)}><Users size={21}/></button></div>
-      <section className="folders-section" aria-label="ПАПКИ"><header><strong>ПАПКИ</strong><button className="icon-button" aria-label="Настроить ПАПКИ" onClick={() => setFoldersOpen(true)}><Plus size={16}/></button></header><div className="folder-tabs"><button className={activeFolder === null ? 'active' : ''} onClick={() => setActiveFolder(null)}>Все</button>{folders.map(folder => <button key={folder.id} className={activeFolder === folder.id ? 'active' : ''} onClick={() => { setActiveFolder(folder.id); setTab('all'); }}>{folder.name}</button>)}</div></section>
-      <div className="chat-tabs"><button className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>Все чаты <span>{rooms.length}</span></button><button className={tab === 'unread' ? 'active' : ''} onClick={() => setTab('unread')}>Новые</button><button className={tab === 'pinned' ? 'active' : ''} onClick={() => setTab('pinned')} aria-label="Закреплённые чаты"><Pin size={15}/></button></div>
+  const unreadChats = rooms.filter(r => r.unread > 0).length;
+  return <main className={`app-shell ${activeRoom ? 'has-active' : ''} ${info && room ? 'with-info' : ''}`} style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
+    <h1 className="sr-only">MatrixGram</h1>
+    <nav className="rail" aria-label="Главное меню">
+      <button className="rail-menu" aria-label="Настройки" onClick={() => setSettings(true)}><Menu size={23}/></button>
+      <div className="rail-folders">
+        <button className={`rail-button ${tab === 'all' && !activeFolder ? 'active' : ''}`} aria-label="Все чаты" aria-pressed={tab === 'all' && !activeFolder} onClick={() => { setTab('all'); setActiveFolder(null); }}><MessageCircle size={27}/><span>Все чаты</span>{unreadChats > 0 && <b className="rail-badge" aria-hidden="true">{unreadChats}</b>}</button>
+        {folders.map(folder => <button key={folder.id} className={`rail-button ${activeFolder === folder.id ? 'active' : ''}`} aria-label={folder.name} title={folder.name} aria-pressed={activeFolder === folder.id} onClick={() => { setActiveFolder(folder.id); setTab('all'); }}><Folder size={25}/><span>{folder.name}</span></button>)}
+        <button className={`rail-button ${tab === 'unread' && !activeFolder ? 'active' : ''}`} aria-label="Новые" aria-pressed={tab === 'unread' && !activeFolder} onClick={() => { setTab('unread'); setActiveFolder(null); }}><MessageCircle size={25}/><span>Новые</span></button>
+        <button className={`rail-button ${tab === 'pinned' && !activeFolder ? 'active' : ''}`} aria-label="Закреплённые чаты" aria-pressed={tab === 'pinned' && !activeFolder} onClick={() => { setTab('pinned'); setActiveFolder(null); }}><Pin size={23}/><span>Закреп.</span></button>
+        <button className="rail-button manage-folders" onClick={() => setFoldersOpen(true)} aria-label="Настроить ПАПКИ"><Folder size={24}/><span>ПАПКИ</span></button>
+      </div>
+      <div className="rail-spacer"/><button className="rail-button" aria-label="Сменить тему" onClick={() => setThemeValue(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? <Moon size={21}/> : <Sun size={21}/>}</button>
+    </nav>
+    <aside className="sidebar" aria-label="Чаты">
+      <div className="sidebar-toolbar"><button className="icon-button mobile-settings" aria-label="Настройки" onClick={() => setSettings(true)}><Menu size={22}/></button><label className="search-field"><Search size={18}/><input placeholder="Поиск" value={search} onChange={e => setSearch(e.target.value)} aria-label="Найти чат"/></label><button className="icon-button" aria-label="Поиск пользователей" title="Поиск людей по имени" onClick={() => setPeopleOpen(true)}><Users size={21}/></button><button className="icon-button" aria-label="Новая комната" title="Новая комната" onClick={() => setCreating(true)}><Pencil size={20}/></button></div>
+      <section className="mobile-folders" aria-label="ПАПКИ"><div className="folder-tabs"><button className={activeFolder === null && tab === 'all' ? 'active' : ''} onClick={() => { setActiveFolder(null); setTab('all'); }}>Все чаты</button><button className={tab === 'unread' ? 'active' : ''} onClick={() => { setActiveFolder(null); setTab('unread'); }}>Новые</button><button aria-label="Закреплённые чаты" className={tab === 'pinned' ? 'active' : ''} onClick={() => { setActiveFolder(null); setTab('pinned'); }}><Pin size={15}/></button>{folders.map(folder => <button key={folder.id} className={activeFolder === folder.id ? 'active' : ''} onClick={() => { setActiveFolder(folder.id); setTab('all'); }}>{folder.name}</button>)}</div><button className="text-button" aria-label="Настроить ПАПКИ" onClick={() => setFoldersOpen(true)}>ПАПКИ</button></section>
       <RoomList rooms={shown} selected={activeRoom} pins={pins} select={id => useStore.getState().select(id)} togglePin={togglePin}/>
-      <button className={`encryption-side-button ${encryption.enabled ? 'enabled' : ''}`} aria-label="Открыть зашифрованные комнаты" onClick={() => setEncryptionOpen(true)}><KeyRound size={19}/><span><strong>Открыть зашифрованные комнаты</strong><small>{encryption.enabled ? 'Ключи и восстановление' : 'Необязательно'}</small></span></button>
-      <div className={`connection ${connection === 'online' ? 'online' : ''}`}>{connection === 'online' ? <Wifi size={14}/> : <WifiOff size={14}/>}<span>{connection === 'online' ? 'Подключено к Matrix' : connection === 'reconnecting' ? 'Переподключение…' : 'Синхронизация…'}</span><small>0.2.0</small></div>
+      <button className={`encryption-side-button ${encryption.enabled ? 'enabled' : ''}`} aria-label="Открыть зашифрованные комнаты" onClick={() => setEncryptionOpen(true)}><KeyRound size={17}/><span><strong>Открыть зашифрованные комнаты</strong></span></button>
+      {connection !== 'online' && <div className="connection" role="status"><WifiOff size={14}/><span>{connection === 'reconnecting' ? 'Переподключение…' : 'Синхронизация…'}</span></div>}
+      <div className="sidebar-resizer" role="separator" tabIndex={0} aria-label="Ширина списка чатов" aria-orientation="vertical" aria-valuemin={280} aria-valuemax={640} aria-valuenow={sidebarWidth}
+        onPointerDown={e => { resizeStart.current = { x: e.clientX, width: sidebarWidth }; e.currentTarget.setPointerCapture(e.pointerId); }}
+        onPointerMove={e => { if (resizeStart.current) resizeSidebar(resizeStart.current.width + e.clientX - resizeStart.current.x); }}
+        onPointerUp={e => { resizeStart.current = null; e.currentTarget.releasePointerCapture(e.pointerId); }} onLostPointerCapture={() => { resizeStart.current = null; }}
+        onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); resizeSidebar(e.key === 'Home' ? 280 : e.key === 'End' ? 640 : sidebarWidth + (e.key === 'ArrowRight' ? 20 : -20)); } }}/>
     </aside>
     {room ? <Chat key={room.id} room={room} showInfo={info} toggleInfo={() => setInfo(!info)} openEncryption={() => setEncryptionOpen(true)}/> : <section className="welcome"><div className="welcome-icon"><MessageCircle size={50} strokeWidth={1.4}/></div><span className="eyebrow">ОБЩЕНИЕ БЕЗ ЛИШНЕГО</span><h2>На связи.<br/>В своей сети.</h2><p>Выберите чат слева<br/>или начните новый разговор.</p><button className="primary" onClick={() => setCreating(true)}><Plus size={18}/>Новая комната</button><span className="welcome-server"><span/>{session.homeserver.replace('https://', '').replace(/\/$/, '')}</span></section>}
-    {room && info && <aside className="details"><header><h3>О комнате</h3><button className="icon-button" aria-label="Скрыть информацию" onClick={() => setInfo(false)}><X size={19}/></button></header><div className="room-profile"><Avatar name={room.name} size="large"/><h2>{room.name}</h2><span>{room.members} участников</span></div><div className="detail-item"><Hash size={20}/><div><small>Matrix ID комнаты</small><p>{room.id}</p></div></div>{room.topic && <div className="detail-item"><Info size={20}/><div><small>Описание</small><p>{room.topic}</p></div></div>}<div className="detail-item"><ShieldOff size={20}/><div><small>Шифрование</small><p>{room.encryption === 'encrypted' ? 'E2EE · ключи подключаются сбоку' : room.encryption === 'unknown' ? 'Проверяется перед отправкой' : 'Без сквозного шифрования'}</p></div></div><div className="details-note"><Info size={17}/><p>MatrixGram 0.2.0<br/>Вложения и звонки ещё в разработке.</p></div></aside>}
+    {room && info && <aside className="details"><header><h3>О комнате</h3><button className="icon-button" aria-label="Скрыть информацию" onClick={() => setInfo(false)}><X size={19}/></button></header><div className="room-profile"><Avatar name={room.name} size="large"/><h2>{room.name}</h2>{room.members > 0 && <span>{memberLabel(room.members)}</span>}</div>{room.topic && <div className="detail-item"><Info size={20}/><div><small>Описание</small><p>{room.topic}</p></div></div>}<div className="detail-item"><ShieldOff size={20}/><div><small>Шифрование</small><p>{room.encryption === 'encrypted' ? 'E2EE · ключи подключаются сбоку' : room.encryption === 'unknown' ? 'Проверяется перед отправкой' : 'Без сквозного шифрования'}</p></div></div><div className="detail-item"><Hash size={20}/><div><small>Matrix ID комнаты</small><p>{room.id}</p></div></div></aside>}
     {error && <div className="toast" role="alert"><CircleAlert size={20}/><span>{error}</span><button className="icon-button" aria-label="Закрыть уведомление" onClick={() => useStore.getState().setError(null)}><X size={18}/></button></div>}
     {creating && <CreateRoom close={() => setCreating(false)}/>}
     {settings && <Preferences close={() => setSettings(false)} theme={theme} setTheme={setThemeValue}/>}

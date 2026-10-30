@@ -27,7 +27,7 @@ npm run tauri -- dev
 npm run tauri -- build --bundles nsis
 ```
 
-По умолчанию EXE: `target/release/matrixgram.exe`, установщик: `target/release/bundle/nsis/MatrixGram_0.2.0_x64-setup.exe`. При заданном `CARGO_TARGET_DIR` ищите их в этой папке. Доступные фактически собранные файлы и контрольные суммы перечисляются в `releases/` и PROGRESS.md.
+По умолчанию EXE: `target/release/matrixgram.exe`, установщик: `target/release/bundle/nsis/MatrixGram_0.3.0_x64-setup.exe`. При заданном `CARGO_TARGET_DIR` ищите их в этой папке. Доступные фактически собранные файлы и контрольные суммы перечисляются в `releases/` и PROGRESS.md.
 
 Установщик предназначен для текущего пользователя. При отсутствии WebView2 Tauri предлагает установить runtime. Для работы без интернета WebView2 нужно заранее установить отдельно.
 
