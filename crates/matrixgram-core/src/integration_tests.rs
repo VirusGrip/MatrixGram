@@ -10,6 +10,87 @@ struct Fixture {
     _dir: tempfile::TempDir,
 }
 
+#[tokio::test]
+async fn forwards_drop_reply_links_and_do_not_repeat_mentions() {
+    use crate::operations::Operation;
+    let f = fixture(false).await;
+    unencrypted_state(&f.server).await;
+    Mock::given(method("GET")).and(path_regex(r"/_matrix/client/v3/rooms/.*/event/.*$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"event_id":"$original","room_id":"!test:example.org","sender":"@bob:example.org","type":"m.room.message","origin_server_ts":20,"content":{"msgtype":"m.text","body":"Hello @carol:example.org","m.mentions":{"user_ids":["@carol:example.org"]},"m.relates_to":{"m.in_reply_to":{"event_id":"$other"}}}}))).mount(&f.server).await;
+    Mock::given(method("PUT"))
+        .and(path_regex(
+            r"/_matrix/client/v3/rooms/.*/send/m.room.message/forward-stable$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"event_id":"$forward"})))
+        .mount(&f.server)
+        .await;
+    f.account
+        .operation(Operation::Forward {
+            room_id: "!test:example.org".into(),
+            source_room: "!test:example.org".into(),
+            event_id: "$original".into(),
+            txn: "forward-stable".into(),
+        })
+        .await
+        .unwrap();
+    let requests = f.server.received_requests().await.unwrap();
+    let sent = requests
+        .iter()
+        .find(|r| r.url.path().ends_with("/forward-stable"))
+        .unwrap()
+        .body_json::<Value>()
+        .unwrap();
+    assert_eq!(sent["body"], "Hello @carol:example.org");
+    assert_eq!(sent["m.mentions"], json!({}));
+    assert!(sent.get("m.relates_to").is_none());
+}
+
+#[tokio::test]
+async fn edits_notify_only_new_mentions_and_reject_other_authors() {
+    let f = fixture(false).await;
+    unencrypted_state(&f.server).await;
+    Mock::given(method("GET")).and(path_regex(r"/_matrix/client/v3/rooms/.*/event/.*$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"event_id":"$original","room_id":"!test:example.org","sender":"@alice:example.org","type":"m.room.message","origin_server_ts":20,"content":{"msgtype":"m.text","body":"@bob:example.org"}}))).mount(&f.server).await;
+    Mock::given(method("PUT"))
+        .and(path_regex(
+            r"/_matrix/client/v3/rooms/.*/send/m.room.message/.*$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"event_id":"$edit"})))
+        .mount(&f.server)
+        .await;
+    f.account
+        .edit(
+            "!test:example.org",
+            "$original",
+            "@bob:example.org @carol:example.org",
+        )
+        .await
+        .unwrap();
+    let requests = f.server.received_requests().await.unwrap();
+    let sent = requests
+        .iter()
+        .find(|r| r.url.path().contains("/send/m.room.message/"))
+        .unwrap()
+        .body_json::<Value>()
+        .unwrap();
+    assert_eq!(
+        sent["m.mentions"]["user_ids"],
+        json!(["@carol:example.org"])
+    );
+    assert_eq!(
+        sent["m.new_content"]["m.mentions"]["user_ids"],
+        json!(["@bob:example.org", "@carol:example.org"])
+    );
+    Mock::given(method("GET")).and(path_regex(r"/_matrix/client/v3/rooms/.*/event/.*$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"event_id":"$foreign","sender":"@bob:example.org","type":"m.room.message","origin_server_ts":20,"content":{"msgtype":"m.text","body":"foreign"}}))).with_priority(1).mount(&f.server).await;
+    assert!(
+        f.account
+            .edit("!test:example.org", "$foreign", "bad edit")
+            .await
+            .is_err()
+    );
+}
+
 fn sync_response(encrypted: bool) -> Value {
     let mut state = vec![
         json!({"type":"m.room.create","state_key":"","sender":"@alice:example.org","event_id":"$create","origin_server_ts":1,"content":{"creator":"@alice:example.org","room_version":"10"}}),
@@ -469,6 +550,459 @@ async fn enabled_e2ee_sends_ciphertext_instead_of_plaintext() {
     assert_eq!(body["algorithm"], "m.megolm.v1.aes-sha2");
     assert!(body["ciphertext"].is_string());
     assert!(!String::from_utf8_lossy(&send.body).contains("PRIVATE DO NOT LEAK"));
+}
+
+#[tokio::test]
+async fn profile_read_and_update_use_matrix_profile_endpoints() {
+    use crate::operations::Operation;
+    let f = fixture(false).await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"/_matrix/client/v3/profile/.*$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"displayname":"Alice Smith","avatar_url":"mxc://example.org/avatar"}),
+        ))
+        .mount(&f.server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path_regex(r"/_matrix/client/v3/profile/.*/displayname$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(&f.server)
+        .await;
+    let profile = f
+        .account
+        .operation(Operation::Profile { user_id: None })
+        .await
+        .unwrap();
+    assert_eq!(profile["displayName"], "Alice Smith");
+    assert_eq!(profile["avatarUrl"], "mxc://example.org/avatar");
+    f.account
+        .operation(Operation::SetProfile {
+            name: "Alice New".into(),
+        })
+        .await
+        .unwrap();
+    let requests = f.server.received_requests().await.unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .find(|r| r.method == "PUT")
+            .unwrap()
+            .body_json::<Value>()
+            .unwrap()["displayname"],
+        "Alice New"
+    );
+}
+
+#[tokio::test]
+async fn attachment_upload_and_download_do_not_expose_access_tokens_to_ui() {
+    use crate::operations::Upload;
+    use base64::Engine;
+    let f = fixture(false).await;
+    unencrypted_state(&f.server).await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"/_matrix/(media/v3|client/v1/media)/config$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"m.upload.size":26214400})))
+        .mount(&f.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path_regex(r"/_matrix/(media/v3|client/v1/media)/upload$"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"content_uri":"mxc://example.org/document"})),
+        )
+        .mount(&f.server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path_regex(
+            r"/_matrix/client/v3/rooms/.*/send/m.room.message/file-txn$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"event_id":"$file"})))
+        .mount(&f.server)
+        .await;
+    let bytes = b"REAL FILE CONTENT";
+    let result = f
+        .account
+        .upload(
+            Upload {
+                room_id: Some("!test:example.org".into()),
+                name: "notes.txt".into(),
+                mime: "text/plain".into(),
+                data: base64::engine::general_purpose::STANDARD.encode(bytes),
+                voice: false,
+                duration_ms: None,
+                txn: "file-txn".into(),
+                target: "message".into(),
+            },
+            |_, _| {},
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, "$file");
+    let requests = f.server.received_requests().await.unwrap();
+    let upload = requests
+        .iter()
+        .find(|r| {
+            r.method == "POST"
+                && r.url.path().contains("/media/")
+                && r.url.path().ends_with("/upload")
+        })
+        .unwrap();
+    assert_eq!(upload.body, bytes);
+    assert_eq!(
+        upload.headers.get("authorization").unwrap(),
+        "Bearer not-a-real-token"
+    );
+    let send = requests
+        .iter()
+        .find(|r| r.url.path().contains("/send/m.room.message/"))
+        .unwrap()
+        .body_json::<Value>()
+        .unwrap();
+    assert_eq!(send["url"], "mxc://example.org/document");
+    assert_eq!(send["msgtype"], "m.file");
+    Mock::given(method("GET"))
+        .and(path_regex(
+            r"/_matrix/client/v1/media/download/example.org/document$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(bytes.to_vec()))
+        .mount(&f.server)
+        .await;
+    let downloaded = f
+        .account
+        .media_content(json!({"url":"mxc://example.org/document"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(downloaded.data)
+            .unwrap(),
+        bytes
+    );
+}
+
+#[tokio::test]
+async fn encrypted_attachment_upload_is_ciphertext_and_sends_encrypted_event() {
+    use crate::operations::Upload;
+    use base64::Engine;
+    let f = fixture(true).await;
+    f.account.enable_encryption().await.unwrap();
+    Mock::given(method("GET"))
+        .and(path_regex(r"/_matrix/(media/v3|client/v1/media)/config$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"m.upload.size":26214400})))
+        .mount(&f.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(
+            r"/_matrix/client/v3/rooms/.*/state/m.room.encryption/?$",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"algorithm":"m.megolm.v1.aes-sha2"})),
+        )
+        .mount(&f.server)
+        .await;
+    Mock::given(method("GET")).and(path_regex(r"/_matrix/client/v3/rooms/.*/members$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"chunk":[{"type":"m.room.member","state_key":"@alice:example.org","sender":"@alice:example.org","event_id":"$m","origin_server_ts":2,"content":{"membership":"join"}}]}))).mount(&f.server).await;
+    Mock::given(method("POST"))
+        .and(path_regex(r"/_matrix/(media/v3|client/v1/media)/upload$"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"content_uri":"mxc://example.org/encrypted"})),
+        )
+        .mount(&f.server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path_regex(
+            r"/_matrix/client/v3/rooms/.*/send/m.room.encrypted/voice-txn$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"event_id":"$voice"})))
+        .mount(&f.server)
+        .await;
+    let bytes = b"PRIVATE AUDIO DATA DO NOT LEAK";
+    f.account
+        .upload(
+            Upload {
+                room_id: Some("!test:example.org".into()),
+                name: "voice.webm".into(),
+                mime: "audio/webm".into(),
+                data: base64::engine::general_purpose::STANDARD.encode(bytes),
+                voice: true,
+                duration_ms: Some(2500),
+                txn: "voice-txn".into(),
+                target: "message".into(),
+            },
+            |_, _| {},
+        )
+        .await
+        .unwrap();
+    let requests = f.server.received_requests().await.unwrap();
+    let upload = requests
+        .iter()
+        .find(|r| {
+            r.method == "POST"
+                && r.url.path().contains("/media/")
+                && r.url.path().ends_with("/upload")
+        })
+        .unwrap();
+    assert_ne!(upload.body, bytes);
+    assert!(!upload.body.windows(bytes.len()).any(|slice| slice == bytes));
+    let send = requests
+        .iter()
+        .find(|r| r.url.path().contains("/send/m.room.encrypted/"))
+        .unwrap();
+    assert!(send.body_json::<Value>().unwrap()["ciphertext"].is_string());
+    assert!(!String::from_utf8_lossy(&send.body).contains("PRIVATE AUDIO"));
+    assert!(
+        !std::fs::read(f.account.store_path.join("timeline.sqlite3"))
+            .unwrap()
+            .windows(bytes.len())
+            .any(|slice| slice == bytes)
+    );
+}
+
+#[tokio::test]
+async fn locked_encrypted_room_and_invalid_media_are_rejected_before_upload() {
+    use crate::operations::Upload;
+    use base64::Engine;
+    let f = fixture(true).await;
+    assert!(
+        f.account
+            .upload(
+                Upload {
+                    room_id: Some("!test:example.org".into()),
+                    name: "secret.txt".into(),
+                    mime: "text/plain".into(),
+                    data: base64::engine::general_purpose::STANDARD.encode(b"private"),
+                    voice: false,
+                    duration_ms: None,
+                    txn: "blocked".into(),
+                    target: "message".into()
+                },
+                |_, _| {}
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        f.account
+            .media_content(json!({"url":"https://example.org/anything"}))
+            .await
+            .is_err()
+    );
+    assert!(
+        !f.server.received_requests().await.unwrap().iter().any(|r| r
+            .url
+            .path()
+            .contains("/media/")
+            && r.url.path().ends_with("/upload")
+            && r.method == "POST")
+    );
+}
+
+#[tokio::test]
+async fn channels_and_opt_in_encryption_are_created_in_initial_state() {
+    use crate::operations::Operation;
+    let f = fixture(false).await;
+    Mock::given(method("POST"))
+        .and(path("/_matrix/client/v3/createRoom"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"room_id":"!new:example.org"})),
+        )
+        .mount(&f.server)
+        .await;
+    f.account
+        .operation(Operation::CreateRoom {
+            name: "News".into(),
+            topic: "Updates".into(),
+            invite: vec![],
+            public: false,
+            channel: true,
+            encrypted: true,
+        })
+        .await
+        .unwrap();
+    let requests = f.server.received_requests().await.unwrap();
+    let request = requests
+        .iter()
+        .find(|r| r.url.path().ends_with("/createRoom"))
+        .unwrap()
+        .body_json::<Value>()
+        .unwrap();
+    assert_eq!(
+        request["power_level_content_override"]["events_default"],
+        100
+    );
+    assert_eq!(
+        request["power_level_content_override"]["users"]["@alice:example.org"],
+        100
+    );
+    assert_eq!(request["initial_state"][0]["type"], "m.room.encryption");
+    assert!(f.account.encryption_status().await.enabled);
+}
+
+#[tokio::test]
+async fn call_signals_use_room_send_and_reject_unrelated_event_types() {
+    use crate::operations::Operation;
+    let f = fixture(false).await;
+    unencrypted_state(&f.server).await;
+    Mock::given(method("PUT"))
+        .and(path_regex(
+            r"/_matrix/client/v3/rooms/.*/send/m.call.invite/.*$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"event_id":"$call"})))
+        .expect(1)
+        .mount(&f.server)
+        .await;
+    let signal = json!({"call_id":"call-123","party_id":"TEST","version":"1","lifetime":60000,"offer":{"type":"offer","sdp":"v=0"}});
+    f.account
+        .operation(Operation::Call {
+            room_id: "!test:example.org".into(),
+            event_type: "m.call.invite".into(),
+            content: signal.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        f.account
+            .operation(Operation::Call {
+                room_id: "!test:example.org".into(),
+                event_type: "m.room.message".into(),
+                content: signal
+            })
+            .await
+            .is_err()
+    );
+    let requests = f.server.received_requests().await.unwrap();
+    let sent = requests
+        .iter()
+        .find(|r| r.url.path().contains("/send/m.call.invite/"))
+        .unwrap()
+        .body_json::<Value>()
+        .unwrap();
+    assert_eq!(sent["offer"]["sdp"], "v=0");
+}
+
+#[tokio::test]
+async fn encrypted_media_download_decrypts_and_rejects_tampered_bytes() {
+    use base64::Engine;
+    let f = fixture(false).await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"/_matrix/(media/v3|client/v1/media)/config$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"m.upload.size":26214400})))
+        .mount(&f.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path_regex(r"/_matrix/(media/v3|client/v1/media)/upload$"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"content_uri":"mxc://example.org/encrypted-download"})),
+        )
+        .mount(&f.server)
+        .await;
+    let plaintext = b"ACTUAL ENCRYPTED ATTACHMENT";
+    let mut reader = std::io::Cursor::new(plaintext);
+    let file = f
+        .account
+        .client
+        .upload_encrypted_file(&mut reader)
+        .await
+        .unwrap();
+    let requests = f.server.received_requests().await.unwrap();
+    let upload = requests
+        .iter()
+        .find(|r| {
+            r.method == "POST"
+                && r.url.path().contains("/media/")
+                && r.url.path().ends_with("/upload")
+        })
+        .unwrap();
+    let ciphertext = upload.body.clone();
+    assert_ne!(ciphertext, plaintext);
+    Mock::given(method("GET"))
+        .and(path_regex(
+            r"/_matrix/client/v1/media/download/example.org/encrypted-download$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(ciphertext.clone()))
+        .mount(&f.server)
+        .await;
+    let source = json!({"file":file});
+    let result = f.account.media_content(source.clone()).await.unwrap();
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(result.data)
+            .unwrap(),
+        plaintext
+    );
+    let mut corrupted = ciphertext;
+    corrupted[0] ^= 1;
+    Mock::given(method("GET"))
+        .and(path_regex(
+            r"/_matrix/client/v1/media/download/example.org/encrypted-download$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(corrupted))
+        .with_priority(1)
+        .mount(&f.server)
+        .await;
+    assert!(f.account.media_content(source).await.is_err());
+}
+
+#[tokio::test]
+async fn device_removal_preserves_interactive_authentication_instead_of_bypassing_it() {
+    use crate::operations::Operation;
+    let f = fixture(false).await;
+    Mock::given(method("POST"))
+        .and(path("/_matrix/client/v3/delete_devices"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(
+            json!({"flows":[{"stages":["m.login.password"]}],"params":{},"session":"auth-session"}),
+        ))
+        .mount(&f.server)
+        .await;
+    let challenge = f
+        .account
+        .operation(Operation::RemoveDevice {
+            device_id: "OTHER".into(),
+            password: None,
+            auth_session: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(challenge["requiresPassword"], true);
+    assert_eq!(challenge["session"], "auth-session");
+    assert!(
+        f.account
+            .operation(Operation::RemoveDevice {
+                device_id: "TEST".into(),
+                password: None,
+                auth_session: None
+            })
+            .await
+            .is_err()
+    );
+    Mock::given(method("POST"))
+        .and(path("/_matrix/client/v3/delete_devices"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .with_priority(1)
+        .mount(&f.server)
+        .await;
+    f.account
+        .operation(Operation::RemoveDevice {
+            device_id: "OTHER".into(),
+            password: Some("test-device-password".into()),
+            auth_session: Some("auth-session".into()),
+        })
+        .await
+        .unwrap();
+    let requests = f.server.received_requests().await.unwrap();
+    let last = requests
+        .iter()
+        .rev()
+        .find(|r| r.url.path().ends_with("/delete_devices"))
+        .unwrap()
+        .body_json::<Value>()
+        .unwrap();
+    assert_eq!(last["auth"]["session"], "auth-session");
+    assert_eq!(last["auth"]["type"], "m.login.password");
+    assert_eq!(last["devices"], json!(["OTHER"]));
 }
 
 #[tokio::test]

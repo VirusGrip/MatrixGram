@@ -8,12 +8,37 @@ use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::{Mutex, RwLock};
+mod accounts;
+
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_ru_madfrog_matrixgram_MainActivity_nativeVaultInit(
+    env: jni::JNIEnv,
+    activity: jni::objects::JObject,
+) {
+    let _ = matrixgram_core::initialize_android_vault(env, activity);
+}
+
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_ru_madfrog_matrixgram_MainActivity_nativeTlsInit(
+    mut env: jni_tls::EnvUnowned,
+    _activity: jni_tls::objects::JObject,
+    context: jni_tls::objects::JObject,
+) {
+    use jni_tls::errors::ThrowRuntimeExAndDefault;
+    env.with_env(|env| rustls_platform_verifier::android::init_with_env(env, context))
+        .resolve::<ThrowRuntimeExAndDefault>();
+}
 
 #[derive(Default)]
 struct Backend {
     account: RwLock<Option<Arc<Account>>>,
     lifecycle: Mutex<()>,
     worker: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    transfers: Mutex<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    profiles: Mutex<std::collections::HashMap<String, Arc<Account>>>,
+    current_profile: Mutex<Option<String>>,
 }
 
 impl Backend {
@@ -25,11 +50,10 @@ impl Backend {
             .ok_or("Выполните вход".into())
     }
 
-    async fn activate(&self, app: tauri::AppHandle, account: Account) -> SessionInfo {
+    async fn activate_arc(&self, app: tauri::AppHandle, account: Arc<Account>) -> SessionInfo {
         if let Some(worker) = self.worker.lock().await.take() {
             worker.abort();
         }
-        let account = Arc::new(account);
         let info = account.info.clone();
         *self.account.write().await = Some(account.clone());
         let session_key = format!("{}|{}", info.user_id, info.device_id);
@@ -72,11 +96,36 @@ async fn bootstrap(
     if let Some(account) = state.account.read().await.as_ref() {
         return Ok(Some(account.info.clone()));
     }
-    let account = Account::restore(&data_dir(&app)?)
+    let root = data_dir(&app)?;
+    let mut catalog = accounts::read(&root)?;
+    let Some(id) =
+        accounts::restore_id(&catalog, root.join("profiles.json").exists()).map(str::to_owned)
+    else {
+        return Ok(None);
+    };
+    let account = Account::restore(&accounts::directory(&root, &id)?)
         .await
         .map_err(|e| e.to_string())?;
     match account {
-        Some(account) => Ok(Some(state.activate(app, account).await)),
+        Some(account) => {
+            if !catalog.entries.iter().any(|e| e.id == id) {
+                catalog.entries.push(accounts::Entry {
+                    id: id.clone(),
+                    user_id: account.info.user_id.clone(),
+                    homeserver: account.info.homeserver.clone(),
+                });
+            }
+            catalog.active = Some(id.clone());
+            accounts::write(&root, &catalog)?;
+            let account = Arc::new(account);
+            state
+                .profiles
+                .lock()
+                .await
+                .insert(id.clone(), account.clone());
+            *state.current_profile.lock().await = Some(id);
+            Ok(Some(state.activate_arc(app, account).await))
+        }
         None => Ok(None),
     }
 }
@@ -93,15 +142,45 @@ async fn login(
     if state.account.read().await.is_some() {
         return Err("Сначала выйдите из текущего аккаунта".into());
     }
-    let account = Account::login(&data_dir(&app)?, &homeserver, &username, &password)
+    let root = data_dir(&app)?;
+    let mut catalog = accounts::read(&root)?;
+    let id = if catalog.entries.is_empty() && !root.join("session.dpapi").exists() {
+        "legacy".to_string()
+    } else {
+        uuid::Uuid::new_v4().to_string()
+    };
+    let account = Account::login(
+        &accounts::directory(&root, &id)?,
+        &homeserver,
+        &username,
+        &password,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    catalog.entries.retain(|e| e.id != id);
+    catalog.entries.push(accounts::Entry {
+        id: id.clone(),
+        user_id: account.info.user_id.clone(),
+        homeserver: account.info.homeserver.clone(),
+    });
+    catalog.active = Some(id.clone());
+    accounts::write(&root, &catalog)?;
+    let account = Arc::new(account);
+    state
+        .profiles
+        .lock()
         .await
-        .map_err(|e| e.to_string())?;
-    Ok(state.activate(app, account).await)
+        .insert(id.clone(), account.clone());
+    *state.current_profile.lock().await = Some(id);
+    Ok(state.activate_arc(app, account).await)
 }
 
 #[tauri::command]
-async fn logout(state: State<'_, Backend>) -> Result<(), String> {
+async fn logout(app: tauri::AppHandle, state: State<'_, Backend>) -> Result<(), String> {
     let _guard = state.lifecycle.lock().await;
+    for token in state.transfers.lock().await.values() {
+        token.cancel();
+    }
     state
         .account()
         .await?
@@ -112,6 +191,14 @@ async fn logout(state: State<'_, Backend>) -> Result<(), String> {
         worker.abort();
     }
     *state.account.write().await = None;
+    if let Some(id) = state.current_profile.lock().await.take() {
+        state.profiles.lock().await.remove(&id);
+        let root = data_dir(&app)?;
+        let mut catalog = accounts::read(&root)?;
+        catalog.entries.retain(|entry| entry.id != id);
+        catalog.active = None;
+        accounts::write(&root, &catalog)?;
+    }
     Ok(())
 }
 
@@ -121,7 +208,13 @@ async fn forget_session(app: tauri::AppHandle, state: State<'_, Backend>) -> Res
     if state.account.read().await.is_some() {
         return Err("Используйте выход из аккаунта".into());
     }
-    Account::forget_local(&data_dir(&app)?).map_err(|e| e.to_string())
+    let root = data_dir(&app)?;
+    let mut catalog = accounts::read(&root)?;
+    let id = catalog.active.clone().unwrap_or_else(|| "legacy".into());
+    Account::forget_local(&accounts::directory(&root, &id)?).map_err(|e| e.to_string())?;
+    catalog.entries.retain(|entry| entry.id != id);
+    catalog.active = None;
+    accounts::write(&root, &catalog)
 }
 
 #[tauri::command]
@@ -372,9 +465,321 @@ async fn typing(state: State<'_, Backend>, room_id: String, active: bool) -> Res
         .map_err(|_| "Не удалось отправить статус набора".into())
 }
 
+#[tauri::command]
+async fn client_operation(
+    state: State<'_, Backend>,
+    operation: matrixgram_core::operations::Operation,
+) -> Result<Value, String> {
+    state
+        .account()
+        .await?
+        .operation(operation)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn list_accounts(app: tauri::AppHandle) -> Result<Value, String> {
+    let catalog = accounts::read(&data_dir(&app)?)?;
+    Ok(json!({"entries":catalog.entries,"active":catalog.active}))
+}
+#[tauri::command]
+async fn add_account(
+    app: tauri::AppHandle,
+    state: State<'_, Backend>,
+    homeserver: String,
+    username: String,
+    password: String,
+) -> Result<SessionInfo, String> {
+    let _guard = state.lifecycle.lock().await;
+    let root = data_dir(&app)?;
+    let mut catalog = accounts::read(&root)?;
+    if catalog.entries.len() >= 10 {
+        return Err("Можно сохранить до 10 аккаунтов".into());
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let directory = accounts::directory(&root, &id)?;
+    let account = Account::login(&directory, &homeserver, &username, &password)
+        .await
+        .map_err(|e| e.to_string())?;
+    catalog.entries.push(accounts::Entry {
+        id: id.clone(),
+        user_id: account.info.user_id.clone(),
+        homeserver: account.info.homeserver.clone(),
+    });
+    catalog.active = Some(id.clone());
+    if let Err(error) = accounts::write(&root, &catalog) {
+        let _ = account.logout().await;
+        return Err(error);
+    }
+    let account = Arc::new(account);
+    state
+        .profiles
+        .lock()
+        .await
+        .insert(id.clone(), account.clone());
+    *state.current_profile.lock().await = Some(id);
+    for token in state.transfers.lock().await.values() {
+        token.cancel();
+    }
+    Ok(state.activate_arc(app, account).await)
+}
+#[tauri::command]
+async fn switch_account(
+    app: tauri::AppHandle,
+    state: State<'_, Backend>,
+    id: String,
+) -> Result<SessionInfo, String> {
+    let _guard = state.lifecycle.lock().await;
+    let root = data_dir(&app)?;
+    let mut catalog = accounts::read(&root)?;
+    if !catalog.entries.iter().any(|entry| entry.id == id) {
+        return Err("Аккаунт не найден".into());
+    }
+    let cached = state.profiles.lock().await.get(&id).cloned();
+    let account = if let Some(account) = cached {
+        account
+    } else {
+        let restored = Account::restore(&accounts::directory(&root, &id)?)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("Сессия не сохранена, войдите заново")?;
+        let account = Arc::new(restored);
+        state
+            .profiles
+            .lock()
+            .await
+            .insert(id.clone(), account.clone());
+        account
+    };
+    catalog.active = Some(id.clone());
+    accounts::write(&root, &catalog)?;
+    *state.current_profile.lock().await = Some(id);
+    for token in state.transfers.lock().await.values() {
+        token.cancel();
+    }
+    Ok(state.activate_arc(app, account).await)
+}
+#[tauri::command]
+async fn fetch_media(
+    state: State<'_, Backend>,
+    source: Value,
+) -> Result<matrixgram_core::operations::MediaData, String> {
+    state
+        .account()
+        .await?
+        .media_content(source)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn upload_file(
+    app: tauri::AppHandle,
+    state: State<'_, Backend>,
+    upload: matrixgram_core::operations::Upload,
+    session_key: Option<String>,
+) -> Result<Value, String> {
+    // Register cancellation under the same lock as account switches.
+    let registration = state.lifecycle.lock().await;
+    let account = state.account().await?;
+    let txn = upload.txn.clone();
+    if session_key
+        .as_deref()
+        .is_some_and(|key| key != format!("{}|{}", account.info.user_id, account.info.device_id))
+    {
+        return Err("Аккаунт изменился, отправка отменена".into());
+    }
+    let token = state
+        .transfers
+        .lock()
+        .await
+        .entry(txn.clone())
+        .or_default()
+        .clone();
+    drop(registration);
+    let progress_txn = txn.clone();
+    let key = format!("{}|{}", account.info.user_id, account.info.device_id);
+    let result = tokio::select! {biased;_=token.cancelled()=>Err("Отправка отменена".into()),result=account.upload(upload,move|current,total|{let _=app.emit("matrix-transfer",json!({"txn":progress_txn,"current":current,"total":total,"sessionKey":key}));})=>result.map_err(|e|e.to_string())};
+    state.transfers.lock().await.remove(&txn);
+    result
+}
+#[tauri::command]
+async fn cancel_upload(state: State<'_, Backend>, txn: String) -> Result<(), String> {
+    let mut transfers = state.transfers.lock().await;
+    if let Some(token) = transfers.get(&txn) {
+        token.cancel();
+    } else if transfers.len() < 100 {
+        transfers.entry(txn).or_default().cancel();
+    }
+    Ok(())
+}
+#[tauri::command]
+async fn save_download(app: tauri::AppHandle, name: String, data: String) -> Result<bool, String> {
+    use base64::Engine;
+    if data.len() > 36_000_000 {
+        return Err("Файл превышает лимит сохранения".into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|_| "Некорректный файл")?;
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        return tauri::async_runtime::spawn_blocking(move || {
+            matrixgram_core::android_save_file(&name, &bytes).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|_| "Не удалось открыть выбор файла".to_string())?;
+    }
+    #[cfg(not(target_os = "android"))]
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let safe_name = std::path::Path::new(&name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("download.bin");
+        let Some(path) = app
+            .dialog()
+            .file()
+            .set_file_name(safe_name)
+            .blocking_save_file()
+        else {
+            return Ok(false);
+        };
+        let path = path
+            .into_path()
+            .map_err(|_| "Этот путь недоступен".to_string())?;
+        std::fs::write(path, bytes).map_err(|_| "Не удалось сохранить файл".to_string())?;
+        Ok(true)
+    })
+    .await
+    .map_err(|_| "Не удалось открыть выбор файла".to_string())?
+}
+#[tauri::command]
+async fn desktop_settings(app: tauri::AppHandle, autostart: Option<bool>) -> Result<Value, String> {
+    #[cfg(desktop)]
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        let manager = app.autolaunch();
+        if let Some(enabled) = autostart {
+            if enabled {
+                manager.enable()
+            } else {
+                manager.disable()
+            }
+            .map_err(|_| "Не удалось настроить автозапуск")?;
+        }
+        Ok(
+            json!({"autostart":manager.is_enabled().map_err(|_|"Не удалось прочитать автозапуск")?,"desktop":true}),
+        )
+    }
+    #[cfg(mobile)]
+    {
+        let _ = (app, autostart);
+        Ok(json!({"autostart":false,"desktop":false}))
+    }
+}
+#[tauri::command]
+fn minimize_to_tray(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("Окно не найдено")?;
+    window
+        .hide()
+        .map_err(|_| "Не удалось свернуть приложение".into())
+}
+#[tauri::command]
+fn native_notify(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app.notification()
+        .builder()
+        .title(title.chars().take(100).collect::<String>())
+        .body(body.chars().take(240).collect::<String>())
+        .show()
+        .map_err(|_| "Не удалось показать уведомление".into())
+}
+#[tauri::command]
+fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err("Разрешены только веб-ссылки".into());
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|_| "Не удалось открыть ссылку".into())
+}
+#[tauri::command]
+async fn media_permissions(video: bool) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            matrixgram_core::android_media_permissions(video).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|_| "Не удалось запросить разрешения".to_string())?
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = video;
+        Ok(true)
+    }
+}
+#[tauri::command]
+async fn request_notifications() -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(|| {
+            matrixgram_core::android_notification_permissions().map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|_| "Не удалось запросить разрешение".to_string())?
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(true)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            #[cfg(mobile)]
+            let _ = app;
+            #[cfg(desktop)]
+            {
+                use tauri::{
+                    menu::{Menu, MenuItem},
+                    tray::TrayIconBuilder,
+                };
+                app.handle()
+                    .plugin(tauri_plugin_autostart::Builder::new().build())?;
+                let show =
+                    MenuItem::with_id(app, "show", "Открыть MatrixGram", true, None::<&str>)?;
+                let quit =
+                    MenuItem::with_id(app, "quit", "Завершить MatrixGram", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show, &quit])?;
+                let mut tray = TrayIconBuilder::new()
+                    .menu(&menu)
+                    .tooltip("MatrixGram")
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "quit" => app.exit(0),
+                        _ => {}
+                    });
+                if let Some(icon) = app.default_window_icon() {
+                    tray = tray.icon(icon.clone());
+                }
+                tray.build(app)?;
+            }
+            Ok(())
+        })
         .manage(Backend::default())
         .invoke_handler(tauri::generate_handler![
             bootstrap,
@@ -401,7 +806,21 @@ pub fn run() {
             get_folders,
             save_folders,
             search_users,
-            open_direct
+            open_direct,
+            client_operation,
+            fetch_media,
+            upload_file,
+            cancel_upload,
+            save_download,
+            desktop_settings,
+            minimize_to_tray,
+            native_notify,
+            open_url,
+            list_accounts,
+            add_account,
+            switch_account,
+            media_permissions,
+            request_notifications
         ])
         .run(tauri::generate_context!())
         .expect("Не удалось запустить MatrixGram");

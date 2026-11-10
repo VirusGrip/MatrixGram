@@ -1,40 +1,29 @@
-# Архитектура 0.3.0
+# Архитектура 0.4.0
 
 ```mermaid
 flowchart LR
   UI[React + Zustand] -->|invoke / events| IPC[Tauri 2]
-  IPC --> Core[matrixgram-core]
-  Core --> SDK[Matrix Rust SDK 0.19.1 + E2EE]
+  IPC --> Profiles[Active account + profiles]
+  Profiles --> Core[matrixgram-core]
+  Core --> SDK[Matrix Rust SDK 0.19.1]
   SDK -->|HTTPS| Synapse[matrix.mad-frog.ru]
-  SDK --> Store[(SDK SQLite с паролем)]
-  Core --> Cache[(UI SQLite: кеш / папки / настройки)]
-  Core --> DPAPI[Windows DPAPI: сессия / пароль store / E2EE-черновики]
+  SDK --> Store[(Password-protected SDK SQLite)]
+  Core --> Cache[(UI SQLite)]
+  Core --> Vault[DPAPI / Android Keystore]
+  UI --> RTC[WebRTC media]
+  RTC --> TURN[Existing TURN via Matrix credentials]
 ```
 
-Один Tauri-клиент использует WebView2 на Windows и системный WebView на Android. Ядро не зависит от Tauri и проверяется на локальном wiremock. Сеть выполняет Rust, интерфейс получает публичные модели без токена и пароля хранилища.
+Сеть Matrix и криптографию выполняет Rust SDK. WebView получает публичные модели, SDP/ICE и медиа, но не access token или пароль SDK store. WebRTC передаёт медиа; сигналы идут через SDK room send и автоматически шифруются для E2EE-комнат.
 
-`Account` владеет SDK Client, кешем, флагом доступа к E2EE и блокировками операций. Backend содержит одну активную сессию и одну задачу обычного Matrix sync. События несут ключ userId|deviceId, чтобы UI отбрасывал обновления старого аккаунта. Ошибки ведут к переподключению с задержкой 2–30 секунд поверх retry SDK.
+Backend держит один активный sync worker и до 10 сохранённых профилей. Неактивные SDK-клиенты могут оставаться в памяти без sync. Переключение отменяет загрузки, останавливает старый worker и очищает UI; события помечены userId|deviceId. Неактивные аккаунты не получают уведомления в фоне.
 
-История — по 50 событий через SDK Room.messages, который расшифровывает доступные события. Ключи существующего backup запрашиваются при открытии E2EE-истории после восстановления. События объединяются по event_id. Исходящие повторы используют тот же transaction ID в пределах процесса.
+Старый каталог остаётся профилем legacy без переноса сессии. `profiles.json` содержит только id/userId/homeserver и активный id. Новый профиль имеет корень `profiles/{uuid}`; внутри сохраняется прежняя структура Account: accounts/{store-id}/sdk-e2ee-v1, timeline.sqlite3 и private-drafts. Профильные ID проверяются как канонические UUID, legacy — специальное значение. Session-файл остаётся защищён DPAPI/Keystore.
 
-До действия пользователя известные E2EE-комнаты не загружают историю и не отправляют отметку прочтения. После включения криптография остаётся на стороне SDK; UI получает расшифрованные события или placeholder отсутствующего ключа. Расшифрованная E2EE-история не записывается в открытый кеш приложения.
+SDK SQLite использует случайный пароль. В UI SQLite открыто хранятся обычные события/комнаты/папки/настройки; E2EE-история туда не записывается. E2EE-черновики используют системный vault. Обычный кеш после logout не удаляется.
 
-## Хранилища
+История загружается страницами, объединяется по event_id и виртуализируется. Проекция проверяет авторство правок, redaction и расшифрованные события. Matrix HTML преобразуется в React-элементы из белого списка без DOM injection. Mentions создаются по полным Matrix ID; правка уведомляет только новых участников, пересылка убирает reply relation и повторные mentions.
 
-- Tauri app_local_data_dir, identifier `ru.madfrog.matrixgram`.
-- `accounts/{uuid}/sdk-e2ee-v1/` — SQLite SDK с отдельным случайным паролем, включая crypto store.
-- `accounts/{uuid}/timeline.sqlite3` — обычные события, комнаты, черновики, redactions и settings; schema version 2, WAL.
-- settings содержит folders, e2ee_enabled и локальное соответствие личных комнат пользователям. Папки относятся к текущей локальной сессии аккаунта, синхронизации между устройствами нет.
-- `accounts/{uuid}/private-drafts/{uuid}` — DPAPI-черновики известных E2EE-комнат на Windows.
-- `session.dpapi` — Matrix-сессия и пароль SDK store. Старая сессия 0.1.0 сохраняет device ID и получает новый SDK store без удаления прежнего кеша.
-- LocalStorage — тема, ширина списка и закреплённые чаты, без токена, recovery key или паролей.
+Глобальная очередь файлов имеет два параллельных отправителя и до 100 ожидающих/неуспешных файлов, лимит файла 25 МБ. Stable txn сохраняется при повторе. Отмена использует CancellationToken; она не откатывает уже принятый сервером event. Очередь не переживает завершение процесса. Медиа скачиваются авторизованно через SDK без дискового media cache; фронтенд кеширует не больше 20 записей / 32 МБ base64 и очищает их при смене аккаунта. Blob URL освобождаются при unmount.
 
-Список комнат и сообщения виртуализированы. Проекция проверяет входные поля, авторство правок, реакции и redaction. HTML остаётся текстом. Расшифрованное событие не заменяется старой копией ciphertext из истории.
-
-Сохранение SDK и UI-кеша не является одной транзакцией; после аварии может понадобиться повторная загрузка истории. Durable outbox, лимит/очистка кеша и multi-account остаются в плане.
-
-## Источники API
-
-[Matrix SDK 0.19.1 features](https://docs.rs/crate/matrix-sdk/0.19.1/features), [Recovery API](https://docs.rs/matrix-sdk/0.19.1/matrix_sdk/encryption/recovery/struct.Recovery.html), [Matrix Client-Server API](https://spec.matrix.org/latest/client-server-api/), [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). Точные зависимости зафиксированы в Cargo.lock и package-lock.json.
-
-Вёрстка 0.3.0 описана в [UI.md](UI.md). Изменение оформления не меняет формат сессии, SDK store, кеша и папок.
+Темы/масштаб/фон/ширина/настройки уведомлений находятся в localStorage; токенов и recovery keys там нет. Полная схема оставшихся работ — ROADMAP.md.

@@ -1,13 +1,21 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowLeft, Check, CheckCheck, CircleAlert, Folder, Hash, Info, KeyRound, LockKeyhole, LogOut, Menu, MessageCircle, Moon, Pencil, Pin, Plus, Reply, Search, Send, ShieldOff, Sun, Trash2, Users, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, Check, CheckCheck, CircleAlert, Copy, Folder, Forward, Globe, Info, KeyRound, LockKeyhole, LogOut, Menu, MessageCircle, Mic, Moon, Paperclip, Pencil, Pin, Plus, Reply, Search, Send, ShieldOff, Smile, Sun, Trash2, Users, WifiOff, X } from 'lucide-react';
 import { api, nativeAvailable, onConnection, onUpdate } from './api';
 import { useStore } from './store';
-import { projectTimeline } from './timeline';
-import type { Message, RoomSummary } from './models';
+import { mergeEvents, projectTimeline } from './timeline';
+import type { Member, Message, RoomDetails, RoomSummary } from './models';
 import { Avatar, Modal } from './ui';
 import { EncryptionDialog, FolderManager, PeopleSearch } from './SidebarFeatures';
 import { memberLabel, sameMessageGroup } from './presentation';
+import { clearMediaCache, FormattedText, MediaView, Uploads, VoiceRecorder } from './Media';
+import { AccountProfile, DevicesPanel, ForwardDialog, KeyExport, PersonProfile, RoomDirectory, RoomInfo } from './RoomFeatures';
+import { DesktopPreferences, notifyMessages } from './SettingsExtras';
+import { CallButtons, CallService } from './Calls';
+import { Accounts } from './Accounts';
+import { TransferService, useUploads } from './Transfers';
+import { useIncomingShare } from './IncomingShare';
+import { HistorySearch } from './HistorySearch';
 const time = (ts: number) => new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 const date = (ts: number) => new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 
@@ -44,8 +52,9 @@ function Login({ loading }: { loading: boolean }) {
       </form>}
       {error && !loading && <button className="text-button" onClick={() => { void api.forget().then(() => useStore.getState().setError(null)).catch(e => useStore.getState().setError(e)); }}>Сбросить сохранённую сессию на этом устройстве</button>}
       <p className="login-note"><KeyRound size={17}/>Зашифрованные комнаты можно открыть после входа.<br/>Восстановление ключей необязательно.</p>
+      {!loading && nativeAvailable() && <Accounts savedOnly/>}
     </section>
-    <footer>MatrixGram · 0.3.0 · ранняя версия</footer>
+    <footer>MatrixGram · 0.4.0 · ранняя версия</footer>
   </main>;
 }
 
@@ -59,7 +68,7 @@ function RoomList({ rooms, selected, pins, select, togglePin }: { rooms: RoomSum
         const room = rooms[row.index];
         return <div className={`room-row ${selected === room.id ? 'selected' : ''}`} key={room.id} style={{ transform: `translateY(${row.start}px)` }}>
           <button className="room-select" onClick={() => select(room.id)} aria-label={`Открыть ${room.name}`}>
-            <Avatar name={room.name}/><span className="room-copy"><span className="room-top"><strong>{room.encryption === 'encrypted' && <LockKeyhole size={12}/>} {room.name}</strong><time>{room.lastTs ? time(room.lastTs) : ''}</time></span>
+            <Avatar name={room.name} url={room.avatarUrl}/><span className="room-copy"><span className="room-top"><strong>{room.encryption === 'encrypted' && <LockKeyhole size={12}/>} {room.name}</strong><time>{room.lastTs ? time(room.lastTs) : ''}</time></span>
               <span className="room-bottom"><span>{room.membership === 'invited' ? 'Приглашение в комнату' : room.encryption === 'encrypted' ? 'Зашифрованная переписка' : room.lastBody || 'Пока нет сообщений'}</span>{room.unread > 0 && <b className="badge">{room.unread}</b>}</span>
             </span>
           </button>
@@ -73,10 +82,12 @@ function RoomList({ rooms, selected, pins, select, togglePin }: { rooms: RoomSum
 function CreateRoom({ close }: { close: () => void }) {
   const [name, setName] = useState(''), [invite, setInvite] = useState(''), [isPublic, setPublic] = useState(false), [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [channel, setChannel] = useState(false), [encrypted, setEncrypted] = useState(false), [topic, setTopic] = useState('');
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError('');
     try {
-      const id = await api.create(name, invite.split(/[\s,]+/).filter(Boolean), isPublic);
+      const id = channel || encrypted || topic ? await api.op<string>('createRoom', { name, topic, invite: invite.split(/[\s,]+/).filter(Boolean), public: isPublic, channel, encrypted }) : await api.create(name, invite.split(/[\s,]+/).filter(Boolean), isPublic);
+      if (encrypted) useStore.setState({ encryption: await api.encryptionStatus() });
       const rooms = await api.rooms(); useStore.setState({ rooms, activeRoom: id }); close();
     } catch (e) { setError(String(e)); } finally { setBusy(false); }
   }
@@ -84,21 +95,29 @@ function CreateRoom({ close }: { close: () => void }) {
     <label>Название<input autoFocus value={name} onChange={e => setName(e.target.value)} required maxLength={255} placeholder="Например, наша команда"/></label>
     <label>Участники< textarea value={invite} onChange={e => setInvite(e.target.value)} placeholder="@имя:matrix.mad-frog.ru — через пробел" rows={3}/></label>
     <label className="checkbox"><input type="checkbox" checked={isPublic} onChange={e => setPublic(e.target.checked)}/>Публичная комната в каталоге сервера</label>
-    <div className="notice"><ShieldOff size={20}/>Комната создаётся без сквозного шифрования. Сервер может читать сообщения.</div>
+    <label>Описание<textarea value={topic} onChange={e => setTopic(e.target.value)} maxLength={4096}/></label>
+    <label className="checkbox"><input type="checkbox" checked={channel} onChange={e => setChannel(e.target.checked)}/>Канал: публикуют только администраторы</label>
+    <label className="checkbox"><input type="checkbox" checked={encrypted} onChange={e => setEncrypted(e.target.checked)}/>Сквозное шифрование E2EE</label>
+    {!encrypted && <div className="notice"><ShieldOff size={20}/>Комната создаётся без сквозного шифрования. Сервер может читать сообщения.</div>}
     {error && <p className="form-error" role="alert">{error}</p>}
     <button className="primary" disabled={busy}>{busy ? 'Создаём…' : 'Создать комнату'}</button>
   </form></Modal>;
 }
 
-function Preferences({ close, theme, setTheme }: { close: () => void; theme: string; setTheme: (value: string) => void }) {
+function Preferences({ close, theme, setTheme, openDirectory }: { close: () => void; theme: string; setTheme: (value: string) => void; openDirectory: () => void }) {
   const session = useStore(s => s.session)!;
   const encryptedEnabled = useStore(s => s.encryption.enabled);
   const [confirm, setConfirm] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   return <Modal title="Настройки" close={close}>
     <div className="profile"><Avatar name={session.userId} size="large"/><strong>{session.userId}</strong><span>{session.homeserver}</span></div>
+    <AccountProfile/>
+    <Accounts/>
     <div className="settings-section"><h3>Оформление</h3><div className="segmented"><button className={theme === 'light' ? 'active' : ''} onClick={() => setTheme('light')}><Sun size={17}/>Светлая</button><button className={theme === 'dark' ? 'active' : ''} onClick={() => setTheme('dark')}><Moon size={17}/>Тёмная</button></div></div>
-    <div className="settings-section"><h3>Сессия</h3><p className="muted">Устройство: {session.deviceId}</p><p className="muted">{session.persisted ? 'Сессия и ключ хранилища защищены Windows DPAPI.' : 'Сессия хранится только до закрытия приложения. Постоянное хранение Android ещё не реализовано.'}</p><p className="muted">Ключи E2EE можно подключить кнопкой сбоку.</p></div>
-    <div className="settings-section"><h3>Ранняя версия</h3><p className="muted">Звонки, вложения, уведомления, голосовые сообщения, несколько аккаунтов и управление устройствами ещё в разработке.</p></div>
+    <div className="settings-section"><h3>Сессия</h3><p className="muted">Устройство: {session.deviceId}</p><p className="muted">{session.persisted ? 'Сессия и ключ хранилища защищены системным хранилищем устройства.' : 'Сессия хранится только до закрытия приложения.'}</p><p className="muted">Ключи E2EE можно подключить кнопкой сбоку.</p></div>
+    <DesktopPreferences/>
+    <button className="text-button" onClick={openDirectory}><Globe size={16}/>Каталог публичных комнат</button>
+    <DevicesPanel/>
+    {encryptedEnabled && <KeyExport/>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {confirm ? <div className="confirm-row"><span>Завершить эту сессию на сервере?{encryptedEnabled && ' Ключи, которых нет в резервной копии или экспорте, могут стать недоступны после выхода.'}</span><button className="danger" disabled={busy} onClick={async () => { setBusy(true); try { await api.logout(); useStore.getState().clear(); close(); } catch (e) { setError(String(e)); } finally { setBusy(false); } }}>Выйти</button><button className="text-button" onClick={() => setConfirm(false)}>Отмена</button></div> : <button className="logout-button" onClick={() => setConfirm(true)}><LogOut size={18}/>Выйти из аккаунта</button>}
   </Modal>;
@@ -114,6 +133,17 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
   const [body, setBody] = useState(''), [loading, setLoading] = useState(false), [sending, setSending] = useState(false);
   const [reply, setReply] = useState<Message | null>(null), [edit, setEdit] = useState<Message | null>(null), [deleting, setDeleting] = useState<Message | null>(null);
   const [find, setFind] = useState(''), [searchOpen, setSearchOpen] = useState(false);
+  const [serverSearch, setServerSearch] = useState(false), [highlight, setHighlight] = useState('');
+  const focusMessage = useRef<string | null>(null);
+  const [forward, setForward] = useState<Message | null>(null), [person, setPerson] = useState(''), [files, setFiles] = useState<File[]>([]), [recording, setRecording] = useState(false), [emoji, setEmoji] = useState(false), [markdown, setMarkdown] = useState(false), [context, setContext] = useState<Message | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const hasTransfers = useUploads(s => s.tasks.some(task => task.roomId === room.id));
+  const [members, setMembers] = useState<Member[]>([]), [canSend, setCanSend] = useState(true);
+  useEffect(() => { let stale = false; if (room.membership === 'joined') void api.op<RoomDetails>('roomDetails', { roomId: room.id }).then(details => { if (!stale) { setMembers(details.members); setCanSend(details.canSend); } }).catch(() => {}); return () => { stale = true; }; }, [room.id, room.membership, session]);
+  const typists = useStore(s => s.typing[room.id]), receipts = useStore(s => s.receipts[room.id]);
+  const [clock, setClock] = useState(Date.now());
+  useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 2000); return () => clearInterval(timer); }, []);
+  const readThrough = Math.max(0, ...Object.entries(receipts ?? {}).filter(([, users]) => users.some(user => user !== session.userId)).map(([id]) => messages.find(message => message.id === id)?.ts ?? 0));
   const draftReady = useRef(false), draftBody = useRef(''), editing = useRef(false), scroll = useRef<HTMLDivElement>(null), stick = useRef(true), initialScroll = useRef(true), typingAt = useRef(0);
   draftBody.current = body; editing.current = edit !== null;
   const filtered = useMemo(() => messages.filter(m => !find || m.body.toLocaleLowerCase().includes(find.toLocaleLowerCase())), [messages, find]);
@@ -148,6 +178,10 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
     return () => observer.disconnect();
   }, [blocked, room.membership]);
   useLayoutEffect(() => {
+    if (focusMessage.current) {
+      const index = filtered.findIndex(message => message.id === focusMessage.current);
+      if (index >= 0) { stick.current = false; initialScroll.current = false; focusMessage.current = null; requestAnimationFrame(() => rows.scrollToIndex(index, { align: 'center' })); return; }
+    }
     if (!filtered.length || (!stick.current && !initialScroll.current)) return;
     const frame = requestAnimationFrame(() => { if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; });
     initialScroll.current = false;
@@ -172,24 +206,26 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!body.trim() || sending || blocked) return;
+    if (!body.trim() || sending || blocked || !canSend) return;
     setSending(true); const value = body;
     try {
       let success = true;
       if (edit) { await api.edit(room.id, edit.id, value); setEdit(null); }
+      else if (markdown && !reply) { await api.op('formatted', { roomId: room.id, body: value, txn: crypto.randomUUID() }); }
       else success = await useStore.getState().send(room.id, value, reply?.id);
       if (success) { setBody(current => current === value ? '' : current); setReply(null); await api.saveDraft(room.id, ''); stick.current = true; }
     } catch (e) { useStore.getState().setError(e); } finally { setSending(false); }
   }
-  return <section className="chat-panel">
+  return <section className="chat-panel" onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }} onDrop={e => { if (e.dataTransfer.files.length && !blocked && canSend) { e.preventDefault(); setFiles([...e.dataTransfer.files]); } }}>
     <header className="chat-header">
       <button className="icon-button back-button" aria-label="Назад к чатам" onClick={() => useStore.getState().select(null)}><ArrowLeft/></button>
-      <button className="chat-heading" onClick={toggleInfo} aria-label={`О чате ${room.name}`}><h2>{room.name}</h2><span>{room.membership === 'invited' ? 'Вас пригласили' : memberLabel(room.members) || (room.encryption === 'encrypted' ? 'Зашифрованная переписка' : 'Переписка')}</span></button>
+      <button className="chat-heading" onClick={toggleInfo} aria-label={`О чате ${room.name}`}><h2>{room.name}</h2><span>{typists && typists.expires > clock && typists.users.length ? `${typists.users.map(id => id.split(':')[0].slice(1)).join(', ')} печатает…` : room.membership === 'invited' ? 'Вас пригласили' : memberLabel(room.members) || (room.encryption === 'encrypted' ? 'Зашифрованная переписка' : 'Переписка')}</span></button>
       {room.encryption === 'encrypted' && <button className="icon-button" aria-label="Ключи комнаты" onClick={openEncryption}><KeyRound size={20}/></button>}
+      {!blocked && <CallButtons room={room}/>}
       <button className="icon-button" aria-label="Поиск в загруженных сообщениях" onClick={() => setSearchOpen(!searchOpen)}><Search size={21}/></button>
       <button className={`icon-button ${showInfo ? 'accent' : ''}`} aria-label="Информация о комнате" onClick={toggleInfo}><Info size={21}/></button>
     </header>
-    {searchOpen && <div className="chat-search"><Search size={17}/><input autoFocus placeholder="Поиск в загруженной истории" value={find} onChange={e => setFind(e.target.value)}/><button className="icon-button" aria-label="Закрыть поиск" onClick={() => { setSearchOpen(false); setFind(''); }}><X size={18}/></button></div>}
+    {searchOpen && <div className="chat-search"><Search size={17}/><input autoFocus placeholder="Поиск в загруженной истории" value={find} onChange={e => setFind(e.target.value)}/>{room.encryption !== 'encrypted' && <button className="text-button" disabled={find.trim().length < 2} onClick={() => setServerSearch(true)}>Вся история</button>}<button className="icon-button" aria-label="Закрыть поиск" onClick={() => { setSearchOpen(false); setFind(''); }}><X size={18}/></button></div>}
     {room.membership === 'invited' ? <div className="chat-state"><Users size={42}/><h2>Приглашение в комнату</h2><p>{room.name}</p><button className="primary" onClick={() => { void api.join(room.id).then(async () => useStore.setState({ rooms: await api.rooms() })).catch(e => useStore.getState().setError(e)); }}>Вступить</button></div> : blocked ? <div className="chat-state"><LockKeyhole size={44}/><h2>Зашифрованная комната</h2><p>Откройте доступные сообщения сейчас.<br/>Ключи для старой истории можно подключить позже.</p><button className="primary" onClick={openEncryption}>Открыть зашифрованные комнаты</button></div> : <>
       <div className="timeline" ref={scroll} onScroll={() => { const el = scroll.current; if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120; }} aria-label="Сообщения">
         <div className="timeline-content">
@@ -201,20 +237,24 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
             const mine = message.sender === session.userId;
             const joinsPrevious = sameMessageGroup(previous, message);
             const joinsNext = sameMessageGroup(message, filtered[row.index + 1]);
-            const sender = message.sender.split(':')[0].replace('@', '');
+            const member = members.find(member => member.userId === message.sender);
+            const sender = member?.name || message.sender.split(':')[0].replace('@', '');
             return <div ref={rows.measureElement} data-index={row.index} key={message.id} className={`message-slot ${joinsPrevious ? 'group-continuation' : 'group-start'}`} style={{ transform: `translateY(${row.start - listOffset}px)` }}>
               {(!previous || date(previous.ts) !== date(message.ts)) && <div className="date-divider"><span>{date(message.ts)}</span></div>}
               <div className={`message-row ${mine ? 'outgoing' : 'incoming'} ${joinsNext ? '' : 'group-end'}`}>
-              {!mine && <span className="message-avatar">{!joinsNext && <Avatar name={sender} size="tiny"/>}</span>}
-              <article className={`bubble ${mine ? 'mine' : ''} ${message.deleted ? 'deleted' : ''}`} aria-label={`Сообщение от ${message.sender}`}>
-                {!mine && !joinsPrevious && <strong className="sender">{sender}</strong>}
+              {!mine && <span className="message-avatar">{!joinsNext && <Avatar name={sender} url={member?.avatarUrl} size="tiny"/>}</span>}
+              <article className={`bubble ${mine ? 'mine' : ''} ${message.deleted ? 'deleted' : ''} ${highlight === message.id ? 'highlight' : ''}`} onContextMenu={e => { e.preventDefault(); setContext(message); }} aria-label={`Сообщение от ${message.sender}`}>
+                {!mine && !joinsPrevious && <button className="sender" onClick={() => setPerson(message.sender)}>{sender}</button>}
                 {message.replyTo && <blockquote>{messages.find(m => m.id === message.replyTo)?.body ?? 'Ответ на более раннее сообщение'}</blockquote>}
-                <p><span className="message-text">{message.body}</span><span className="message-meta">{message.edited && 'изменено · '}{time(message.ts)}{mine && <Check size={14} aria-label="Отправлено на сервер"/>}</span></p>
+                {message.attachment && <MediaView attachment={message.attachment}/>}
+                <div className="message-body"><div className="message-text">{!message.attachment && <FormattedText html={message.formattedBody} fallback={message.body} onMention={setPerson}/>}</div><span className="message-meta">{message.edited && 'изменено · '}{time(message.ts)}{mine && (readThrough >= message.ts ? <CheckCheck size={14} aria-label="Прочитано"/> : <Check size={14} aria-label="Отправлено на сервер"/>)}</span></div>
                 {message.reactions.length > 0 && <div className="reactions">{message.reactions.map(r => <span key={r.key}>{r.key} {r.count}</span>)}</div>}
                 {!message.deleted && !message.encrypted && <div className="message-actions">
                   <button title="Ответить" aria-label="Ответить" onClick={() => { setReply(message); setEdit(null); }}><Reply size={15}/></button>
                   <button title="Реакция 👍" aria-label="Реакция 👍" onClick={() => { void api.react(room.id, message.id, '👍').catch(e => useStore.getState().setError(e)); }}>👍</button>
-                  {mine && <><button title="Редактировать" aria-label="Редактировать" onClick={() => { setEdit(message); setReply(null); setBody(message.body); }}><Pencil size={14}/></button><button title="Удалить" aria-label="Удалить" onClick={() => setDeleting(message)}><Trash2 size={14}/></button></>}
+                  <button title="Переслать" aria-label="Переслать" onClick={() => setForward(message)}><Forward size={15}/></button>
+                  <button title="Ещё действия" aria-label="Ещё действия" onClick={() => setContext(message)}>···</button>
+                  {mine && <>{!message.attachment && <button title="Редактировать" aria-label="Редактировать" onClick={() => { setEdit(message); setReply(null); setBody(message.body); }}><Pencil size={14}/></button>}<button title="Удалить" aria-label="Удалить" onClick={() => setDeleting(message)}><Trash2 size={14}/></button></>}
                 </div>}
               </article>
               </div>
@@ -225,19 +265,33 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
         </div>
       </div>
       {(reply || edit) && <div className="composer-context"><Reply size={20}/><span><strong>{edit ? 'Редактирование' : 'Ответ'}</strong><small>{(edit ?? reply)?.body}</small></span><button className="icon-button" aria-label="Отменить ответ или редактирование" onClick={() => { if (edit) setBody(''); setEdit(null); setReply(null); }}><X size={17}/></button></div>}
-      <form className="composer" onSubmit={submit}>
+      {(files.length > 0 || hasTransfers) && <Uploads roomId={room.id} files={files} done={() => setFiles([])}/>}
+      {recording && <VoiceRecorder roomId={room.id} close={() => setRecording(false)}/>}
+      {emoji && <div className="emoji-picker">{['😀','🙂','😂','😍','🥰','😎','🤔','😢','👍','👎','❤️','🔥','🎉','🙏','✅','👀','💯','🤝','🚀','☕'].map(value => <button key={value} aria-label={`Вставить ${value}`} onClick={() => { setBody(current => current + value); setEmoji(false); }}>{value}</button>)}</div>}
+      {!canSend && <div className="channel-readonly"><LockKeyhole size={16}/>В этой комнате публиковать сообщения могут только участники с правами на отправку.</div>}
+      {canSend && <form className="composer" onSubmit={submit}>
+        <input type="file" multiple ref={fileInput} className="sr-only" aria-label="Файлы для отправки" onChange={e => { setFiles([...e.target.files || []]); e.target.value = ''; }}/>
+        <button type="button" className="icon-button" aria-label="Прикрепить файл" onClick={() => fileInput.current?.click()}><Paperclip size={22}/></button>
         <textarea aria-label="Сообщение" placeholder="Написать сообщение…" value={body} rows={1} maxLength={16000} onChange={e => {
           setBody(e.target.value);
           if (Date.now() - typingAt.current > 5000) { typingAt.current = Date.now(); void api.typing(room.id, true).catch(() => {}); }
-        }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(e); } }}/>
+        }} onPaste={e => { const pasted = [...e.clipboardData.files]; if (pasted.length) { e.preventDefault(); setFiles(pasted); } }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(e); } }}/>
+        <button type="button" className={`format-toggle ${markdown ? 'accent' : ''}`} title="Отправлять с форматированием Markdown" aria-label="Форматирование Markdown" aria-pressed={markdown} onClick={() => setMarkdown(!markdown)}>Aa</button>
+        <button type="button" className="icon-button" aria-label="Эмодзи" onClick={() => setEmoji(!emoji)}><Smile size={22}/></button>
+        {!body.trim() && <button type="button" className="icon-button" aria-label="Записать голосовое" onClick={() => setRecording(true)}><Mic size={22}/></button>}
         <button type="submit" className="send-button" aria-label={edit ? 'Сохранить изменение' : 'Отправить'} disabled={!body.trim() || sending}>{edit ? <Check size={21}/> : <Send size={21}/>}</button>
-      </form>
+      </form>}
     </>}
     {deleting && <Modal title="Удалить сообщение?" close={() => setDeleting(null)}><p>Сообщение будет удалено для участников комнаты через Matrix.</p><div className="modal-actions"><button className="text-button" onClick={() => setDeleting(null)}>Отмена</button><button className="danger" onClick={() => { void api.redact(room.id, deleting.id).then(() => setDeleting(null)).catch(e => useStore.getState().setError(e)); }}>Удалить</button></div></Modal>}
+    {forward && <ForwardDialog message={forward} sourceRoom={room.id} close={() => setForward(null)}/>}
+    {person && <PersonProfile userId={person} close={() => setPerson('')}/>}
+    {serverSearch && <HistorySearch room={room} initial={find} close={() => setServerSearch(false)} locate={event => { focusMessage.current = event.event_id; setHighlight(event.event_id); setFind(''); useStore.setState(s => ({ events: { ...s.events, [room.id]: mergeEvents(s.events[room.id] ?? [], [event]) } })); }}/>}
+    {context && <Modal title="Действия с сообщением" close={() => setContext(null)}><div className="message-menu"><button onClick={() => { void navigator.clipboard.writeText(context.body).then(() => setContext(null)).catch(e => useStore.getState().setError(e)); }}><Copy size={17}/>Копировать текст</button><button onClick={() => { void navigator.clipboard.writeText(`https://matrix.to/#/${encodeURIComponent(room.id)}/${encodeURIComponent(context.id)}`).then(() => setContext(null)); }}>Копировать ссылку</button><button onClick={() => { setReply(context); setContext(null); }}><Reply size={17}/>Ответить</button><button onClick={() => { setForward(context); setContext(null); }}><Forward size={17}/>Переслать</button><button onClick={() => { void api.op('pin', { roomId: room.id, eventId: context.id, pinned: true }).then(() => setContext(null)).catch(e => useStore.getState().setError(e)); }}><Pin size={17}/>Закрепить</button><div className="reaction-picker">{['👍','❤️','😂','🔥','🎉','😢','👀','🙏'].map(value => <button key={value} onClick={() => { void api.react(room.id, context.id, value).then(() => setContext(null)).catch(e => useStore.getState().setError(e)); }}>{value}</button>)}</div><button onClick={() => { void api.op<string[]>('readBy', { roomId: room.id, eventId: context.id }).then(users => window.alert(users.length ? `Прочитали:\n${users.join('\n')}` : 'Отметок прочтения пока нет')).catch(e => useStore.getState().setError(e)); }}>Кто прочитал</button></div></Modal>}
   </section>;
 }
 
 export default function App() {
+  const incomingShare = useIncomingShare();
   const session = useStore(s => s.session), rooms = useStore(s => s.rooms), activeRoom = useStore(s => s.activeRoom), error = useStore(s => s.error), connection = useStore(s => s.connection);
   const [booting, setBooting] = useState(nativeAvailable()), [search, setSearch] = useState(''), [tab, setTab] = useState('all');
   const [creating, setCreating] = useState(false), [settings, setSettings] = useState(false), [info, setInfo] = useState(false);
@@ -245,6 +299,11 @@ export default function App() {
   const [pins, setPins] = useState<string[]>([]);
   const [peopleOpen, setPeopleOpen] = useState(false), [foldersOpen, setFoldersOpen] = useState(false), [encryptionOpen, setEncryptionOpen] = useState(false);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
+  const allEvents = useStore(s => s.events);
+  useEffect(() => { clearMediaCache(); }, [session]);
+  useEffect(() => { setInfo(false); setCreating(false); setSettings(false); setPeopleOpen(false); setFoldersOpen(false); setEncryptionOpen(false); setDirectoryOpen(false); setActiveFolder(null); setSearch(''); setTab('all'); }, [session]);
+  useEffect(() => { document.documentElement.style.setProperty('--ui-scale', String((Number(localStorage.getItem('matrixgram.scale')) || 100) / 100)); document.documentElement.dataset.background = localStorage.getItem('matrixgram.background') || 'plain'; }, []);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const stored = Number(localStorage.getItem('matrixgram.sidebarWidth'));
     return Number.isFinite(stored) && stored >= 280 && stored <= 640 ? stored : 380;
@@ -264,7 +323,7 @@ export default function App() {
     if (!nativeAvailable()) return;
     let disposed = false; const cleanup: (() => void)[] = [];
     void (async () => {
-      const unlisten = await onUpdate((key, update) => useStore.getState().apply(key, update)); cleanup.push(unlisten);
+      const unlisten = await onUpdate((key, update) => { const state = useStore.getState(); if (state.session && `${state.session.userId}|${state.session.deviceId}` === key) notifyMessages(key, update, state.connection !== 'online'); state.apply(key, update); }); cleanup.push(unlisten);
       const unconnect = await onConnection((key, message) => { const s = useStore.getState().session; if (s && `${s.userId}|${s.deviceId}` === key) useStore.setState({ connection: 'reconnecting', error: message }); }); cleanup.push(unconnect);
       if (disposed) { cleanup.forEach(fn => fn()); return; }
       const saved = await api.bootstrap();
@@ -293,6 +352,7 @@ export default function App() {
         <button className={`rail-button ${tab === 'unread' && !activeFolder ? 'active' : ''}`} aria-label="Новые" aria-pressed={tab === 'unread' && !activeFolder} onClick={() => { setTab('unread'); setActiveFolder(null); }}><MessageCircle size={25}/><span>Новые</span></button>
         <button className={`rail-button ${tab === 'pinned' && !activeFolder ? 'active' : ''}`} aria-label="Закреплённые чаты" aria-pressed={tab === 'pinned' && !activeFolder} onClick={() => { setTab('pinned'); setActiveFolder(null); }}><Pin size={23}/><span>Закреп.</span></button>
         <button className="rail-button manage-folders" onClick={() => setFoldersOpen(true)} aria-label="Настроить ПАПКИ"><Folder size={24}/><span>ПАПКИ</span></button>
+        <button className="rail-button" aria-label="Каталог комнат" onClick={() => setDirectoryOpen(true)}><Globe size={24}/><span>Каталог</span></button>
       </div>
       <div className="rail-spacer"/><button className="rail-button" aria-label="Сменить тему" onClick={() => setThemeValue(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? <Moon size={21}/> : <Sun size={21}/>}</button>
     </nav>
@@ -309,12 +369,16 @@ export default function App() {
         onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); resizeSidebar(e.key === 'Home' ? 280 : e.key === 'End' ? 640 : sidebarWidth + (e.key === 'ArrowRight' ? 20 : -20)); } }}/>
     </aside>
     {room ? <Chat key={room.id} room={room} showInfo={info} toggleInfo={() => setInfo(!info)} openEncryption={() => setEncryptionOpen(true)}/> : <section className="welcome"><div className="welcome-icon"><MessageCircle size={50} strokeWidth={1.4}/></div><span className="eyebrow">ОБЩЕНИЕ БЕЗ ЛИШНЕГО</span><h2>На связи.<br/>В своей сети.</h2><p>Выберите чат слева<br/>или начните новый разговор.</p><button className="primary" onClick={() => setCreating(true)}><Plus size={18}/>Новая комната</button><span className="welcome-server"><span/>{session.homeserver.replace('https://', '').replace(/\/$/, '')}</span></section>}
-    {room && info && <aside className="details"><header><h3>О комнате</h3><button className="icon-button" aria-label="Скрыть информацию" onClick={() => setInfo(false)}><X size={19}/></button></header><div className="room-profile"><Avatar name={room.name} size="large"/><h2>{room.name}</h2>{room.members > 0 && <span>{memberLabel(room.members)}</span>}</div>{room.topic && <div className="detail-item"><Info size={20}/><div><small>Описание</small><p>{room.topic}</p></div></div>}<div className="detail-item"><ShieldOff size={20}/><div><small>Шифрование</small><p>{room.encryption === 'encrypted' ? 'E2EE · ключи подключаются сбоку' : room.encryption === 'unknown' ? 'Проверяется перед отправкой' : 'Без сквозного шифрования'}</p></div></div><div className="detail-item"><Hash size={20}/><div><small>Matrix ID комнаты</small><p>{room.id}</p></div></div></aside>}
+    {room && info && <RoomInfo key={room.id} room={room} messages={projectTimeline(allEvents[room.id] ?? [])} close={() => setInfo(false)}/>}
     {error && <div className="toast" role="alert"><CircleAlert size={20}/><span>{error}</span><button className="icon-button" aria-label="Закрыть уведомление" onClick={() => useStore.getState().setError(null)}><X size={18}/></button></div>}
     {creating && <CreateRoom close={() => setCreating(false)}/>}
-    {settings && <Preferences close={() => setSettings(false)} theme={theme} setTheme={setThemeValue}/>}
+    {settings && <Preferences close={() => setSettings(false)} theme={theme} setTheme={setThemeValue} openDirectory={() => { setSettings(false); setDirectoryOpen(true); }}/>}
     {peopleOpen && <PeopleSearch close={() => setPeopleOpen(false)}/>}
     {foldersOpen && <FolderManager close={() => setFoldersOpen(false)}/>}
     {encryptionOpen && <EncryptionDialog close={() => setEncryptionOpen(false)}/>}
+    {directoryOpen && <RoomDirectory close={() => setDirectoryOpen(false)}/>}
+    <CallService/>
+    <TransferService/>
+    {incomingShare}
   </main>;
 }

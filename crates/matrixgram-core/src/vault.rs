@@ -67,15 +67,162 @@ pub fn load(path: &Path) -> Result<Option<Vec<u8>>> {
     }
 }
 
-// Android Keystore bridge is pending. Never fall back to plaintext tokens.
-#[cfg(not(windows))]
+// Unsupported platforms never fall back to plaintext tokens.
+#[cfg(not(any(windows, target_os = "android")))]
 pub fn save(_path: &Path, _plaintext: &[u8]) -> Result<bool> {
     Ok(false)
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "android")))]
 pub fn load(_path: &Path) -> Result<Option<Vec<u8>>> {
     Ok(None)
+}
+
+#[cfg(target_os = "android")]
+mod android {
+    use super::*;
+    use jni::{
+        JNIEnv, JavaVM,
+        objects::{GlobalRef, JByteArray, JObject, JValue},
+    };
+    use std::sync::{Arc, Mutex, OnceLock};
+    type Bridge = (Arc<JavaVM>, GlobalRef);
+    static BRIDGE: OnceLock<Mutex<Bridge>> = OnceLock::new();
+    pub fn initialize(env: JNIEnv, activity: JObject) -> Result<()> {
+        let vm = Arc::new(
+            env.get_java_vm()
+                .map_err(|_| CoreError::User("Android VM недоступна".into()))?,
+        );
+        let activity = env
+            .new_global_ref(activity)
+            .map_err(|_| CoreError::User("Android Activity недоступна".into()))?;
+        if let Some(bridge) = BRIDGE.get() {
+            *bridge
+                .lock()
+                .map_err(|_| CoreError::User("Хранилище занято".into()))? = (vm, activity);
+        } else {
+            let _ = BRIDGE.set(Mutex::new((vm, activity)));
+        }
+        Ok(())
+    }
+    fn bridge() -> Result<Bridge> {
+        let guard = BRIDGE
+            .get()
+            .ok_or_else(|| CoreError::User("Android Keystore ещё запускается".into()))?
+            .lock()
+            .map_err(|_| CoreError::User("Хранилище занято".into()))?;
+        Ok((guard.0.clone(), guard.1.clone()))
+    }
+    pub fn protect(data: &[u8], encrypt: bool) -> Result<Vec<u8>> {
+        let (vm, activity) = bridge()?;
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|_| CoreError::User("Keystore недоступен".into()))?;
+        let input = env
+            .byte_array_from_slice(data)
+            .map_err(|_| CoreError::User("Не удалось передать данные Keystore".into()))?;
+        let result = env.call_method(
+            activity.as_obj(),
+            "protectVault",
+            "([BZ)[B",
+            &[JValue::Object(input.as_ref()), JValue::Bool(encrypt.into())],
+        );
+        match result
+            .and_then(|value| value.l())
+            .and_then(|value| env.convert_byte_array(JByteArray::from(value)))
+        {
+            Ok(bytes) => Ok(bytes),
+            Err(_) => {
+                let _ = env.exception_clear();
+                Err(CoreError::User("Android Keystore не смог открыть хранилище. Не удаляйте данные приложения; проверьте блокировку устройства.".into()))
+            }
+        }
+    }
+    pub fn permissions(video: bool) -> Result<bool> {
+        let (vm, activity) = bridge()?;
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|_| CoreError::User("Android недоступен".into()))?;
+        let result = env.call_method(
+            activity.as_obj(),
+            "requestMediaPermissions",
+            "(Z)Z",
+            &[JValue::Bool(video.into())],
+        );
+        match result.and_then(|v| v.z()) {
+            Ok(value) => Ok(value),
+            Err(_) => {
+                let _ = env.exception_clear();
+                Err(CoreError::User(
+                    "Не удалось запросить разрешения Android".into(),
+                ))
+            }
+        }
+    }
+    pub fn notifications() -> Result<bool> {
+        let (vm, activity) = bridge()?;
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|_| CoreError::User("Android недоступен".into()))?;
+        let result = env.call_method(activity.as_obj(), "requestNotifications", "()Z", &[]);
+        match result.and_then(|v| v.z()) {
+            Ok(value) => Ok(value),
+            Err(_) => {
+                let _ = env.exception_clear();
+                Err(CoreError::User(
+                    "Не удалось запросить уведомления Android".into(),
+                ))
+            }
+        }
+    }
+    pub fn save_file(name: &str, bytes: &[u8]) -> Result<bool> {
+        let (vm, activity) = bridge()?;
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|_| CoreError::User("Android недоступен".into()))?;
+        let name = env
+            .new_string(name)
+            .map_err(|_| CoreError::User("Не удалось передать имя файла".into()))?;
+        let bytes = env
+            .byte_array_from_slice(bytes)
+            .map_err(|_| CoreError::User("Не удалось передать файл".into()))?;
+        let result = env.call_method(
+            activity.as_obj(),
+            "saveDownload",
+            "(Ljava/lang/String;[B)Z",
+            &[
+                JValue::Object(name.as_ref()),
+                JValue::Object(bytes.as_ref()),
+            ],
+        );
+        match result.and_then(|v| v.z()) {
+            Ok(value) => Ok(value),
+            Err(_) => {
+                let _ = env.exception_clear();
+                Err(CoreError::User("Не удалось сохранить файл Android".into()))
+            }
+        }
+    }
+}
+#[cfg(target_os = "android")]
+pub use android::{
+    initialize as initialize_android_vault, notifications as android_notification_permissions,
+    permissions as android_media_permissions, save_file as android_save_file,
+};
+#[cfg(target_os = "android")]
+pub fn save(path: &Path, plaintext: &[u8]) -> Result<bool> {
+    let encrypted = android::protect(plaintext, true)?;
+    let pending = path.with_extension("pending");
+    std::fs::write(&pending, encrypted)?;
+    std::fs::rename(pending, path)?;
+    Ok(true)
+}
+#[cfg(target_os = "android")]
+pub fn load(path: &Path) -> Result<Option<Vec<u8>>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    Ok(Some(android::protect(&std::fs::read(path)?, false)?))
 }
 
 pub fn clear(path: &Path) -> Result<()> {

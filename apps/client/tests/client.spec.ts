@@ -13,6 +13,10 @@ let events = [{event_id:'$hello',sender:'@bob:test',type:'m.room.message',origin
 let drafts = {};
 let encryption = {enabled:false,backupReady:false};
 let folders = JSON.parse(localStorage.getItem('test-folders') || '[]');
+let pinned=[];let profileName='Alice';let notificationMode='Some(AllMessages)';
+const mediaStore={};
+const pixel='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+const publish=roomId=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[{roomId,events,next:null}],connection:'online',error:null}));
 export const api = {
  bootstrap:async()=>null, login:async()=>{setTimeout(()=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[],connection:'online',error:null})),30);return session}, rooms:async()=>rooms, logout:async()=>{}, forget:async()=>{},
  cached:async id=>id==='!plain:test'?events:[], history:async id=>{if(id==='!secret:test')window.__secretHistoryCount=(window.__secretHistoryCount||0)+1;return {roomId:id,events:id==='!plain:test'?events:id==='!secret:test'&&encryption.enabled?[{event_id:'$secret',sender:'@bob:test',type:'m.room.message',origin_server_ts:2000,content:{body:'Открытое сообщение E2EE'}}]:[],next:null}},
@@ -32,8 +36,32 @@ export const api = {
  importEncryptionKeys:async()=>{encryption={enabled:true,backupReady:false};return 1},
  folders:async()=>folders,saveFolders:async value=>{folders=value;localStorage.setItem('test-folders',JSON.stringify(value));return value},
  searchUsers:async term=>({users:'Иван Иванов'.toLowerCase().includes(term.toLowerCase())?[{userId:'@ivan:test',displayName:'Иван Иванов'}]:[],limited:false}),
- openDirect:async userId=>{if(!rooms.some(r=>r.id==='!dm:test'))rooms.push({id:'!dm:test',name:'Иван Иванов',membership:'joined',encryption:'unencrypted',unread:0,members:2,lastBody:null,lastTs:0});return '!dm:test'}
+ openDirect:async userId=>{if(!rooms.some(r=>r.id==='!dm:test'))rooms.push({id:'!dm:test',name:'Иван Иванов',membership:'joined',encryption:'unencrypted',unread:0,members:2,lastBody:null,lastTs:0});return '!dm:test'},
+ op:async(kind,args={})=>{
+   window.__operations=[...(window.__operations||[]),{kind,...args}];
+   if(kind==='roomDetails')return {members:[{userId:'@alice:test',name:'Alice',power:100,membership:'join'},{userId:'@bob:test',name:'Bob',power:0,membership:'join'}],pinned,myPower:100,canSend:true,name:'Команда Matrix',encrypted:false,notificationMode};
+   if(kind==='profile')return {userId:args.userId||session.userId,displayName:args.userId?'Bob':profileName};
+   if(kind==='setProfile'){profileName=args.name;return null;}
+   if(kind==='devices')return [{id:'TEST',name:'MatrixGram',current:true,lastSeen:1000},{id:'OTHER',name:'Element',current:false}];
+   if(kind==='pin'){pinned=args.pinned?[args.eventId]:[];return null;}
+   if(kind==='readBy')return ['@bob:test'];
+   if(kind==='notifications'){notificationMode=args.mode==='mute'?'Some(Mute)':'Some(AllMessages)';return null;}
+   if(kind==='publicRooms')return {rooms:[{room_id:'!public:test',name:'Открытая группа',topic:'Для всех',num_joined_members:8}],next:null};
+   if(kind==='join'){rooms.push({id:'!public:test',name:'Открытая группа',membership:'joined',encryption:'unencrypted',unread:0,members:8,lastBody:null,lastTs:0});return '!public:test';}
+   if(kind==='leave'){const index=rooms.findIndex(r=>r.id===args.roomId);rooms.splice(index,1);return null;}
+   if(kind==='search')return {room_events:{results:[],next_batch:null}};
+   if(kind==='turn')return {urls:[],username:'',credential:''};
+   if(kind==='exportKeys')return '-----BEGIN MEGOLM SESSION DATA-----test-encrypted';
+   if(kind==='formatted'){const id='$formatted';events.push({event_id:id,sender:session.userId,type:'m.room.message',origin_server_ts:3000,content:{msgtype:'m.text',body:args.body,format:'org.matrix.custom.html',formatted_body:'<strong>Важное</strong>'}});setTimeout(()=>publish(args.roomId),5);return id;}
+   return null;
+ },
+ media:async source=>({data:mediaStore[source.url]||pixel}),
+ upload:async upload=>{window.__uploads=[...(window.__uploads||[]),{...upload,data:undefined,bytes:atob(upload.data).length}];if(upload.target==='profile')return 'mxc://test/avatar';const id='$upload'+Date.now(),url='mxc://test/'+upload.txn;mediaStore[url]=upload.data;events.push({event_id:id,sender:session.userId,type:'m.room.message',origin_server_ts:Date.now(),content:{msgtype:upload.voice?'m.audio':upload.mime.startsWith('image/')?'m.image':'m.file',body:upload.name,url,info:{mimetype:upload.mime,size:20,duration:upload.durationMs},...(upload.voice?{'org.matrix.msc3245.voice':{}}:{})}});setTimeout(()=>publish(upload.roomId),5);return id;},
+ cancelUpload:async()=>{},saveFile:async(name,data)=>{window.__savedFile={name,data};return true},
+ desktop:async autostart=>({desktop:true,autostart:!!autostart}),minimize:async()=>{},notify:async()=>{},openUrl:async url=>{window.__openedUrl=url},
+ accounts:async()=>({entries:[],active:null}),addAccount:async()=>session,switchAccount:async()=>session,mediaPermissions:async()=>true,requestNotifications:async()=>true
 };
+export const onTransfer=async()=>()=>{};
 export const onUpdate=async callback=>{updates.add(callback);return ()=>updates.delete(callback)};
 export const onConnection=async()=>()=>{};
 `;
@@ -59,7 +87,7 @@ test('login, room selection, sending, and safe text rendering', async ({ page })
   await expect(page.getByText('Привет, команда!', { exact: true }).last()).toBeVisible();
   await page.getByRole('textbox', { name: 'Сообщение', exact: true }).fill('<img src=x onerror=alert(1)>');
   await page.getByRole('button', { name: 'Отправить', exact: true }).click();
-  await expect(page.locator('.message-list .bubble p').filter({ hasText: '<img src=x onerror=alert(1)>' })).toBeVisible();
+  await expect(page.locator('.message-list .message-text').filter({ hasText: '<img src=x onerror=alert(1)>' })).toBeVisible();
   await expect(page.locator('.timeline img')).toHaveCount(0);
   await expect(page.locator('.pending')).toHaveCount(0);
   await page.screenshot({ path: 'test-results/desktop-chat.png' });
@@ -80,7 +108,7 @@ test('failed sends can be retried without creating a second pending message', as
   await page.getByRole('button', { name: 'Отправить', exact: true }).click();
   await expect(page.getByText('Не отправлено', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Повторить', exact: true }).click();
-  await expect(page.locator('.message-list .bubble p').filter({ hasText: 'Сбой' })).toHaveCount(1);
+  await expect(page.locator('.message-list .message-text').filter({ hasText: 'Сбой' })).toHaveCount(1);
   await expect(page.locator('.pending')).toHaveCount(0);
 });
 
@@ -233,4 +261,205 @@ test('long history remains virtualized and can scroll from newest to oldest', as
   await page.locator('.timeline').evaluate(element => { element.scrollTop = 0; element.dispatchEvent(new Event('scroll')); });
   await expect(page.locator('.message-text').filter({ hasText: 'Сообщение 1:' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(1280);
+});
+
+test('file upload renders an image and saves authenticated media', async ({ page }) => {
+  await login(page);
+  await page.getByRole('button', { name: 'Открыть Команда Matrix' }).click();
+  await page.getByLabel('Файлы для отправки').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64') });
+  await expect(page.getByText('Отправлено', { exact: true })).toBeVisible();
+  const preview = page.getByRole('button', { name: 'Открыть изображение photo.png' });
+  await expect(preview).toBeVisible();
+  await preview.click();
+  await expect(page.getByRole('dialog', { name: 'photo.png' })).toBeVisible();
+  await page.getByRole('button', { name: 'Сохранить изображение' }).click();
+  expect(await page.evaluate(() => (window as any).__savedFile.name)).toBe('photo.png');
+  await page.getByRole('dialog').getByRole('button', { name: 'Закрыть', exact: true }).click();
+  await page.screenshot({ path: 'test-results/media-upload.png' });
+});
+
+test('member list, profile, pin, forward and room settings call the real IPC contract', async ({ page }) => {
+  await login(page); await page.getByRole('button', { name: 'Открыть Команда Matrix' }).click();
+  await page.getByRole('button', { name: 'Информация о комнате', exact: true }).click();
+  await expect(page.locator('.member-row')).toHaveCount(2);
+  await page.getByLabel('Поиск участников').fill('Bob');
+  await expect(page.locator('.member-row')).toHaveCount(1);
+  await page.locator('.member-row > button').click();
+  await expect(page.getByRole('dialog', { name: 'Профиль пользователя' })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Закрыть', exact: true }).click();
+  await page.getByRole('button', { name: 'Скрыть информацию' }).click();
+  await page.locator('.bubble').first().click({ button: 'right' });
+  await page.getByRole('dialog').getByRole('button', { name: 'Закрепить', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.locator('.bubble').first().hover(); await page.getByRole('button', { name: 'Переслать', exact: true }).first().click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Команда Matrix', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).__operations.filter((v:any) => v.kind === 'forward').length)).toBe(1);
+});
+
+test('profile and native preferences can be changed without exposing session secrets', async ({ page }) => {
+  await login(page); await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+  await page.getByLabel('Отображаемое имя').fill('Новое имя');
+  await page.getByRole('button', { name: 'Сохранить имя' }).click();
+  await expect(page.getByText('Имя сохранено', { exact: true })).toBeVisible();
+  await expect(page.getByText('Element', { exact: true })).toBeVisible();
+  await page.getByLabel('Показывать текст в уведомлении').check();
+  expect(await page.evaluate(() => localStorage.getItem('matrixgram.preview'))).toBe('on');
+});
+
+test('rich text discards executable HTML and preserves allowed formatting', async ({ page }) => {
+  const adapter = withMessages([['@bob:test', 'Безопасный текст']]).replace('body:"Безопасный текст"', 'body:"Безопасный текст"');
+  const htmlAdapter = adapter.replace('"body":"Безопасный текст"', '"body":"Безопасный текст","format":"org.matrix.custom.html","formatted_body":"<strong>Жирный</strong><img src=x onerror=alert(1)><a href=javascript:alert(1)>ссылка</a><script>window.__xss=true</script>"');
+  await login(page, htmlAdapter); await page.getByRole('button', { name: 'Открыть Команда Matrix' }).click();
+  await expect(page.locator('.formatted-text strong')).toHaveText('Жирный');
+  await expect(page.locator('.formatted-text img,.formatted-text script,.formatted-text a')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__xss)).toBeUndefined();
+});
+
+test('voice recording sends playable audio and supports pause, seek and save', async ({ page, context }) => {
+  await context.grantPermissions(['microphone']);
+  await login(page); await page.getByRole('button', { name: 'Открыть Команда Matrix' }).click();
+  await page.getByRole('button', { name: 'Записать голосовое' }).click();
+  await expect(page.getByRole('button', { name: 'Отправить голосовое' })).toBeEnabled({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Пауза записи' }).click();
+  await page.getByRole('button', { name: 'Продолжить запись' }).click();
+  await page.getByRole('button', { name: 'Отправить голосовое' }).click();
+  await expect(page.locator('.voice-recorder')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__uploads.some((v:any) => v.voice && v.mime.startsWith('audio/') && v.durationMs > 0 && v.bytes > 200))).toBe(true);
+  await page.getByRole('button', {name:/Загрузить voice-/}).click();
+  await expect(page.locator('.media-audio audio')).toHaveCount(1);
+  await page.locator('.media-audio audio').evaluate(async (audio:HTMLAudioElement)=>{await audio.play();});
+  await expect.poll(()=>page.locator('.media-audio audio').evaluate((audio:HTMLAudioElement)=>audio.currentTime)).toBeGreaterThan(0);
+  await page.locator('.media-audio audio').evaluate((audio:HTMLAudioElement)=>{audio.currentTime=.1;audio.pause();});
+  await page.locator('.media-audio').getByRole('button',{name:'Сохранить',exact:true}).click();
+  expect(await page.evaluate(()=>(window as any).__savedFile.data.length)).toBeGreaterThan(200);
+});
+
+test('two WebRTC peers exchange RTP through Matrix signalling and stop media on hangup', async ({ page, context }) => {
+  await context.grantPermissions(['microphone']); await page.goto('/');
+  await page.evaluate(async () => {
+    const { CallEngine } = await import('/src/callEngine.ts' as string);
+    const states:any = {}, peers:any = {}, signals:any[] = [];
+    for (const party of ['A','B']) peers[party] = new CallEngine({ party, ice:async()=>[], changed:(state:any)=>{states[party]=state}, send:async(roomId:string,type:string,content:any)=>{
+      signals.push({party,type,content}); const target=party==='A'?'B':'A';
+      setTimeout(()=>peers[target].receive(roomId,{event_id:crypto.randomUUID(),sender:'@'+party+':test',type,origin_server_ts:Date.now(),content}),0);
+    }});
+    (window as any).__calls={states,peers,signals}; await peers.A.start('!call:test',false);
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).__calls.states.B?.direction)).toBe('incoming');
+  await page.evaluate(() => (window as any).__calls.peers.B.answer());
+  await expect.poll(() => page.evaluate(() => !!(window as any).__calls.states.A?.started && !!(window as any).__calls.states.B?.started), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => page.evaluate(async () => { const stats = await (window as any).__calls.peers.A.pc.getStats(); let packets=0; stats.forEach((v:any)=>{if(v.type==='inbound-rtp')packets+=v.packetsReceived||0});return packets }), { timeout: 10_000 }).toBeGreaterThan(0);
+  const muted = await page.evaluate(() => { const c=(window as any).__calls;c.peers.A.mute('audio',true);return c.states.A.local.getAudioTracks().every((track:any)=>!track.enabled); });
+  expect(muted).toBe(true);
+  await page.evaluate(async () => { const c=(window as any).__calls; c.previousTracks=c.states.A.local.getTracks();await c.peers.A.hangup(); });
+  await expect.poll(() => page.evaluate(() => (window as any).__calls.states.B)).toBeNull();
+  expect(await page.evaluate(() => (window as any).__calls.previousTracks.every((track:any)=>track.readyState==='ended'))).toBe(true);
+});
+
+test('switching accounts clears the previous timeline and ignores old account events', async ({ page }) => {
+  const adapter=fixtureApi.replace('accounts:async()=>({entries:[],active:null})', `accounts:async()=>({entries:[{id:'alice',userId:'@alice:test',homeserver:'https://matrix.test'},{id:'bob',userId:'@bob:test',homeserver:'https://matrix.test'}],active:window.__activeAccount||'alice'})`)
+    .replace('switchAccount:async()=>session', `switchAccount:async id=>{window.__activeAccount=id;return {...session,userId:'@bob:test',deviceId:'BOB'}}`)
+    .replace('rooms:async()=>rooms', `rooms:async()=>window.__activeAccount==='bob'?[{id:'!bob:test',name:'Личный чат Bob',membership:'joined',encryption:'unencrypted',unread:0,members:1,lastBody:null,lastTs:0}]:rooms`);
+  await login(page,adapter);await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await expect(page.locator('.message-text').filter({hasText:'Привет, команда!'})).toBeVisible();
+  await page.getByRole('button',{name:'Настройки',exact:true}).click();
+  await page.locator('.accounts-panel').getByRole('button',{name:'@bob:test https://matrix.test'}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Открыть Личный чат Bob'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Открыть Команда Matrix'})).toHaveCount(0);
+  await expect(page.locator('.message-text')).toHaveCount(0);
+});
+
+test('file upload continues across chat navigation and is not enqueued twice', async ({ page }) => {
+  const adapter=fixtureApi.replace('upload:async upload=>{', 'upload:async upload=>{window.__started=(window.__started||0)+1;await new Promise(resolve=>window.__finishUpload=resolve);');
+  await login(page,adapter); await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await page.getByLabel('Файлы для отправки').setInputFiles({name:'background.txt',mimeType:'text/plain',buffer:Buffer.from('background upload')});
+  await expect.poll(()=>page.evaluate(()=>(window as any).__started)).toBe(1);
+  await page.getByRole('button',{name:'Открыть Закрытая комната'}).click();
+  await page.evaluate(()=>(window as any).__finishUpload());
+  await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await expect(page.getByText('Отправлено',{exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>(window as any).__uploads.length)).toBe(1);
+});
+
+test('cancelled file upload stays cancelled when the native request settles', async ({ page }) => {
+  const adapter=fixtureApi.replace('upload:async upload=>{', 'upload:async upload=>{await new Promise(resolve=>window.__finishUpload=resolve);throw new Error("Отправка отменена");')
+    .replace('cancelUpload:async()=>{}','cancelUpload:async()=>{window.__cancelled=true;window.__finishUpload?.()}');
+  await login(page,adapter); await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await page.getByLabel('Файлы для отправки').setInputFiles({name:'cancel.txt',mimeType:'text/plain',buffer:Buffer.from('cancel me')});
+  await expect(page.getByRole('button',{name:'Отменить cancel.txt'})).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>typeof (window as any).__finishUpload)).toBe('function');
+  await page.getByRole('button',{name:'Отменить cancel.txt'}).click();
+  await expect(page.getByText('Отменено',{exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>(window as any).__cancelled)).toBe(true);
+  await expect(page.getByText('Отправлено',{exact:true})).toHaveCount(0);
+});
+
+test('server history search opens a message outside loaded history', async ({ page }) => {
+  const found={event_id:'$old-search',sender:'@bob:test',type:'m.room.message',origin_server_ts:500,content:{msgtype:'m.text',body:'Архивная встреча'}};
+  const adapter=fixtureApi.replace("if(kind==='search')return {room_events:{results:[],next_batch:null}};", `if(kind==='search')return {room_events:{results:[{result:${JSON.stringify(found)}}],next_batch:null}};if(kind==='event')return ${JSON.stringify(found)};`);
+  await login(page,adapter); await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await page.getByRole('button',{name:'Поиск в загруженных сообщениях'}).click();
+  await page.getByPlaceholder('Поиск в загруженной истории').fill('встреча');
+  await page.getByRole('button',{name:'Вся история',exact:true}).click();
+  await page.getByRole('dialog').getByRole('button').filter({hasText:'Архивная встреча'}).click();
+  await expect(page.locator('.bubble.highlight')).toContainText('Архивная встреча');
+});
+
+test('read-only channel hides the composer and explains permissions', async ({ page }) => {
+  await login(page,fixtureApi.replace('canSend:true','canSend:false'));
+  await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await expect(page.locator('.channel-readonly')).toBeVisible();
+  await expect(page.getByRole('textbox',{name:'Сообщение',exact:true})).toHaveCount(0);
+});
+
+test('Android share waits for a recipient and Back closes dialogs before chat navigation', async ({ page }) => {
+  await login(page); await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('matrixgram-share',{detail:{text:'Из другого приложения',files:[{name:'shared.txt',mime:'text/plain',data:btoa('shared bytes')}]}})));
+  await expect(page.getByRole('dialog',{name:'Поделиться в MatrixGram'})).toBeVisible();
+  expect(await page.evaluate(()=>(window as any).__uploads?.length||0)).toBe(0);
+  await page.getByRole('button',{name:'Отправить в Команда Matrix',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect.poll(()=>page.evaluate(()=>(window as any).__uploads?.length||0)).toBe(1);
+  await page.getByRole('button',{name:'Настройки',exact:true}).click();
+  expect(await page.evaluate(()=>window.matrixgramBack?.())).toBe(true);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await page.evaluate(()=>window.matrixgramBack?.())).toBe(true);
+  await expect(page.locator('.chat-panel')).toHaveCount(0);
+});
+
+test('interface scale stays inside the desktop and mobile viewport', async ({ page }) => {
+  await page.addInitScript(()=>localStorage.setItem('matrixgram.scale','125'));
+  await page.setViewportSize({width:1280,height:820}); await login(page);
+  await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(1280);
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
+});
+
+test('room refresh failure after switching never restores the old account identity', async ({ page }) => {
+  const adapter=fixtureApi.replace('accounts:async()=>({entries:[],active:null})', `accounts:async()=>({entries:[{id:'alice',userId:'@alice:test',homeserver:'https://matrix.test'},{id:'bob',userId:'@bob:test',homeserver:'https://matrix.test'}],active:window.__activeAccount||'alice'})`)
+    .replace('switchAccount:async()=>session', `switchAccount:async id=>{window.__activeAccount=id;return {...session,userId:'@bob:test',deviceId:'BOB'}}`)
+    .replace('rooms:async()=>rooms', `rooms:async()=>{if(window.__activeAccount==='bob')throw new Error('Нет сети');return rooms}`);
+  await login(page,adapter); await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await page.getByRole('button',{name:'Настройки',exact:true}).click();
+  await page.locator('.accounts-panel').getByRole('button',{name:'@bob:test https://matrix.test'}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Открыть Команда Matrix'})).toHaveCount(0);
+  await page.getByRole('button',{name:'Настройки',exact:true}).click();
+  await expect(page.getByRole('dialog').locator('.profile').first()).toContainText('@bob:test');
+});
+
+test('a delayed incoming call cannot reopen after its account session is disposed', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const {CallEngine}=await import('/src/callEngine.ts' as string);
+    const probe:any={states:[]};
+    probe.engine=new CallEngine({party:'ME',ice:async()=>[],send:async()=>{},changed:(state:any)=>probe.states.push(state),acceptInvite:()=>new Promise(resolve=>probe.release=resolve)});
+    probe.engine.receive('!call:test',{event_id:'$delayed',sender:'@bob:test',type:'m.call.invite',origin_server_ts:Date.now(),content:{call_id:'delayed',party_id:'BOB',version:'1',lifetime:60000,offer:{type:'offer',sdp:'v=0'}}});
+    (window as any).__disposedCall=probe;
+  });
+  await expect.poll(()=>page.evaluate(()=>typeof (window as any).__disposedCall.release)).toBe('function');
+  await page.evaluate(async ()=>{const p=(window as any).__disposedCall;p.engine.dispose();p.release(true);await p.engine.queue;});
+  expect(await page.evaluate(()=>(window as any).__disposedCall.states)).toEqual([null]);
 });

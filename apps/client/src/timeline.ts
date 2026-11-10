@@ -43,6 +43,13 @@ export function projectTimeline(events: MatrixEvent[]): Message[] {
       encrypted, deleted: redacted.has(event.event_id), edited: false,
       replyTo: text(object(rel['m.in_reply_to']).event_id) || undefined,
       reactions: [],
+      formattedBody: c.format === 'org.matrix.custom.html' ? text(c.formatted_body) : undefined,
+      attachment: !redacted.has(event.event_id) && ['m.image','m.video','m.audio','m.file'].includes(text(c.msgtype)) && (c.url || c.file) ? {
+        kind: text(c.msgtype), name: text(c.filename) || text(c.body) || 'Файл', mime: text(object(c.info).mimetype) || 'application/octet-stream',
+        size: typeof object(c.info).size === 'number' ? object(c.info).size as number : undefined,
+        duration: typeof object(c.info).duration === 'number' ? object(c.info).duration as number : undefined,
+        voice: !!c['org.matrix.msc3245.voice'], source: c.file ? { file: c.file } : { url: c.url },
+      } : undefined,
     });
   }
   const reactionUsers = new Map<string, Set<string>>();
@@ -53,7 +60,7 @@ export function projectTimeline(events: MatrixEvent[]): Message[] {
     if (!target || target.deleted || target.encrypted) continue;
     if (event.type === 'm.room.message' && rel.rel_type === 'm.replace' && event.sender === target.sender) {
       const body = object(c['m.new_content']).body;
-      if (typeof body === 'string') { target.body = body; target.edited = true; }
+      if (typeof body === 'string') { target.body = body; target.edited = true; target.formattedBody = text(object(c['m.new_content']).formatted_body) || undefined; }
     }
     if (event.type === 'm.reaction' && rel.rel_type === 'm.annotation' && typeof rel.key === 'string') {
       const key = `${target.id}\0${rel.key}`;
@@ -64,5 +71,5 @@ export function projectTimeline(events: MatrixEvent[]): Message[] {
       else target.reactions.push({ key: rel.key, count: users.size });
     }
   }
-  return [...messages.values()].map(message => message.deleted ? { ...message, body: 'Сообщение удалено', reactions: [], replyTo: undefined } : message);
+  return [...messages.values()].map(message => message.deleted ? { ...message, body: 'Сообщение удалено', reactions: [], replyTo: undefined, attachment: undefined, formattedBody: undefined } : message);
 }

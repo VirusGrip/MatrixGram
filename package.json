@@ -1,6 +1,6 @@
 {
   "name": "matrixgram",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "workspaces": [
     "apps/client"
@@ -11,7 +11,8 @@
     "test": "npm run test -w @matrixgram/client",
     "test:e2e": "npm run test:e2e -w @matrixgram/client",
     "tauri": "npm run tauri -w @matrixgram/client --",
-    "check:policy": "node scripts/check-policy.mjs"
+    "check:policy": "node scripts/check-policy.mjs",
+    "android:prepare": "node scripts/prepare-android.mjs"
   },
   "engines": {
     "node": ">=22"

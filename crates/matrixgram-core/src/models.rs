@@ -24,6 +24,8 @@ pub struct RoomSummary {
     pub members: u64,
     pub last_body: Option<String>,
     pub last_ts: i64,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -72,6 +74,7 @@ pub struct Update {
     pub timelines: Vec<TimelinePage>,
     pub connection: String,
     pub error: Option<String>,
+    pub ephemeral: Vec<Value>,
 }
 
 #[derive(Debug, thiserror::Error)]

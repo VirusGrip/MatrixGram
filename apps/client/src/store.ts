@@ -8,6 +8,8 @@ interface Store {
   events: Record<string, MatrixEvent[]>; cursors: Record<string, string | null>;
   pending: PendingMessage[]; connection: string; error: string | null;
   encryption: EncryptionStatus; folders: ChatFolder[];
+  typing: Record<string, { users: string[]; expires: number }>;
+  receipts: Record<string, Record<string, string[]>>;
   loadFeatures: () => Promise<void>;
   setSession: (session: SessionInfo | null) => void;
   setError: (error: unknown) => void;
@@ -17,7 +19,7 @@ interface Store {
   send: (roomId: string, body: string, replyTo?: string, txn?: string) => Promise<boolean>;
   clear: () => void;
 }
-const empty = { session: null, rooms: [], activeRoom: null, events: {}, cursors: {}, pending: [], connection: 'connecting', error: null, encryption: { enabled: false, backupReady: false }, folders: [] };
+const empty = { session: null, rooms: [], activeRoom: null, events: {}, cursors: {}, pending: [], connection: 'connecting', error: null, encryption: { enabled: false, backupReady: false }, folders: [], typing: {}, receipts: {} };
 export const useStore = create<Store>((set, get) => ({
   ...empty,
   setSession: session => set({ session }),
@@ -34,7 +36,23 @@ export const useStore = create<Store>((set, get) => ({
     for (const page of update.timelines) events[page.roomId] = mergeEvents(events[page.roomId] ?? [], page.events);
     const receivedIds = new Set(update.timelines.flatMap(p => p.events.map(e => e.event_id)));
     const receivedTxn = new Set(update.timelines.flatMap(p => p.events.map(e => e.unsigned?.transaction_id)));
+    const typing = { ...state.typing }, receipts = { ...state.receipts };
+    for (const ephemeral of update.ephemeral ?? []) {
+      if (ephemeral.type === 'm.typing' && Array.isArray(ephemeral.content.user_ids)) typing[ephemeral.roomId] = { users: ephemeral.content.user_ids.filter((id): id is string => typeof id === 'string' && id !== state.session!.userId), expires: Date.now() + 30_000 };
+      if (ephemeral.type === 'm.receipt') {
+        const current = { ...receipts[ephemeral.roomId] };
+        for (const [id, value] of Object.entries(ephemeral.content)) {
+          if (value && typeof value === 'object' && 'm.read' in value) {
+            const users = Object.keys((value as Record<string, Record<string, unknown>>)['m.read'] ?? {});
+            for (const old of Object.keys(current)) current[old] = current[old].filter(user => !users.includes(user));
+            current[id] = users;
+          }
+        }
+        receipts[ephemeral.roomId] = current;
+      }
+    }
     set({ rooms: update.rooms, events, connection: update.connection, error: update.error,
+      typing, receipts,
       pending: state.pending.filter(p => !receivedTxn.has(p.txn) && !(p.eventId && receivedIds.has(p.eventId))) });
   },
   select: activeRoom => set({ activeRoom }),

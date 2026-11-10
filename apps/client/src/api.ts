@@ -29,7 +29,22 @@ export const api = {
   saveFolders: (folders: ChatFolder[]) => invoke<ChatFolder[]>('save_folders', { folders }),
   searchUsers: (term: string) => invoke<UserSearchResult>('search_users', { term }),
   openDirect: (userId: string) => invoke<string>('open_direct', { userId }),
+  op: <T = unknown>(kind: string, args: Record<string, unknown> = {}) => invoke<T>('client_operation', { operation: { kind, ...args } }),
+  media: (source: Record<string, unknown>) => invoke<{ data: string }>('fetch_media', { source }),
+  upload: (upload: Record<string, unknown>) => { const { sessionKey, ...payload } = upload; return invoke<string>('upload_file', { upload: payload, sessionKey: sessionKey ?? null }); },
+  cancelUpload: (txn: string) => invoke<void>('cancel_upload', { txn }),
+  saveFile: (name: string, data: string) => invoke<boolean>('save_download', { name, data }),
+  desktop: (autostart?: boolean) => invoke<{ desktop: boolean; autostart: boolean }>('desktop_settings', { autostart: autostart ?? null }),
+  minimize: () => invoke<void>('minimize_to_tray'),
+  notify: (title: string, body: string) => invoke<void>('native_notify', { title, body }),
+  openUrl: (url: string) => invoke<void>('open_url', { url }),
+  accounts: () => invoke<{ entries: { id: string; userId: string; homeserver: string }[]; active: string | null }>('list_accounts'),
+  addAccount: (homeserver: string, username: string, password: string) => invoke<SessionInfo>('add_account', { homeserver, username, password }),
+  switchAccount: (id: string) => invoke<SessionInfo>('switch_account', { id }),
+  mediaPermissions: (video: boolean) => invoke<boolean>('media_permissions', { video }),
+  requestNotifications: () => invoke<boolean>('request_notifications'),
 };
+export const onTransfer = (callback: (transfer: { txn: string; current: number; total: number; sessionKey: string }) => void) => listen('matrix-transfer', event => callback(event.payload as Parameters<typeof callback>[0]));
 
 export function onUpdate(callback: (sessionKey: string, update: Update) => void) {
   return listen<{ sessionKey: string; update: Update }>('matrix-update', ({ payload }) => callback(payload.sessionKey, payload.update));

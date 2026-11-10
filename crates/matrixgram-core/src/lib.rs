@@ -3,8 +3,14 @@ mod features;
 #[cfg(test)]
 mod integration_tests;
 pub mod models;
+pub mod operations;
 pub mod policy;
 mod vault;
+#[cfg(target_os = "android")]
+pub use vault::{
+    android_media_permissions, android_notification_permissions, android_save_file,
+    initialize_android_vault,
+};
 
 use cache::Cache;
 use matrix_sdk::{
@@ -57,6 +63,18 @@ pub struct Account {
 fn install_tls() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
+pub(crate) fn mentioned_users(
+    body: &str,
+) -> std::collections::BTreeSet<matrix_sdk::ruma::OwnedUserId> {
+    body.split_whitespace()
+        .filter_map(|word| {
+            let word = word.trim_matches(|c: char| {
+                matches!(c, ',' | '.' | '!' | '?' | '(' | ')' | '"' | '\'' | ';')
+            });
+            matrix_sdk::ruma::UserId::parse(word).ok()
+        })
+        .collect()
+}
 
 async fn build_client(homeserver: &str, store_path: &Path, passphrase: &str) -> Result<Client> {
     install_tls();
@@ -68,7 +86,7 @@ async fn build_client(homeserver: &str, store_path: &Path, passphrase: &str) -> 
             auto_enable_backups: false,
             backup_download_strategy: BackupDownloadStrategy::Manual,
         })
-        .user_agent("MatrixGram/0.3.0")
+        .user_agent(concat!("MatrixGram/", env!("CARGO_PKG_VERSION")))
         .respect_login_well_known(false)
         .build()
         .await
@@ -274,6 +292,7 @@ impl Account {
                 members: room.joined_members_count(),
                 last_body,
                 last_ts,
+                avatar_url: room.avatar_url().map(|u| u.to_string()),
             });
         }
         result.sort_by(|a, b| b.last_ts.cmp(&a.last_ts).then_with(|| a.name.cmp(&b.name)));
@@ -302,7 +321,14 @@ impl Account {
                 }
             })?;
         let mut timelines = Vec::new();
+        let mut ephemeral = Vec::new();
         for (id, room) in response.rooms.joined {
+            for event in &room.ephemeral {
+                if let Ok(mut value) = serde_json::from_str::<Value>(event.json().get()) {
+                    value["roomId"] = json!(id);
+                    ephemeral.push(value);
+                }
+            }
             let encrypted = self
                 .client
                 .get_room(&id)
@@ -343,6 +369,7 @@ impl Account {
             timelines,
             connection: "online".into(),
             error: None,
+            ephemeral,
         })
     }
 
@@ -417,13 +444,14 @@ impl Account {
             return Err(CoreError::User("Некорректный ID отправки".into()));
         }
         let room = self.writable_room(room_id).await?;
-        let content = if let Some(reply) = reply_to {
+        let mut content = if let Some(reply) = reply_to {
             let id = OwnedEventId::try_from(reply)
                 .map_err(|_| CoreError::User("Некорректный ID сообщения".into()))?;
             json!({"msgtype":"m.text","body":body,"m.relates_to":{"m.in_reply_to":{"event_id":id}}})
         } else {
             json!({"msgtype":"m.text","body":body})
         };
+        content["m.mentions"] = json!({"user_ids":mentioned_users(body)});
         let transaction: &TransactionId = txn.into();
         let response = room
             .send_raw("m.room.message", content)
@@ -438,7 +466,17 @@ impl Account {
         let room = self.writable_room(room_id).await?;
         let id = OwnedEventId::try_from(event_id.to_owned())
             .map_err(|_| CoreError::User("Некорректный ID сообщения".into()))?;
-        room.send_raw("m.room.message", json!({"msgtype":"m.text","body":format!("* {body}"),"m.new_content":{"msgtype":"m.text","body":body},"m.relates_to":{"rel_type":"m.replace","event_id":id}})).await.map_err(network_error)?;
+        let original = room.event(&id, None).await.map_err(network_error)?;
+        let raw: Value = serde_json::from_str(original.raw().json().get())?;
+        if raw["sender"].as_str() != Some(self.info.user_id.as_str()) {
+            return Err(CoreError::User(
+                "Редактировать можно только свои сообщения".into(),
+            ));
+        }
+        let users = mentioned_users(body);
+        let previous = mentioned_users(raw["content"]["body"].as_str().unwrap_or(""));
+        let new_users = users.difference(&previous).cloned().collect::<Vec<_>>();
+        room.send_raw("m.room.message", json!({"msgtype":"m.text","body":format!("* {body}"),"m.mentions":{"user_ids":new_users},"m.new_content":{"msgtype":"m.text","body":body,"m.mentions":{"user_ids":users}},"m.relates_to":{"rel_type":"m.replace","event_id":id}})).await.map_err(network_error)?;
         Ok(())
     }
 

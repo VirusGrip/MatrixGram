@@ -23,7 +23,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: npm ci
       - run: cargo fmt --all -- --check
-      - run: cargo test -p matrixgram-core --locked
+      - run: cargo test --workspace --locked
       - run: npm test
       - run: npm run check:policy
       - run: npm exec -w @matrixgram/client -- playwright install chromium
