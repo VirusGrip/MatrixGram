@@ -1,0 +1,95 @@
+{
+  "version": "0.5.1",
+  "date": "2026-11-11",
+  "baselineCommit": "27398dcb6704d93f8f5d35b4b79f22914df77a89",
+  "environment": {
+    "cpu": "AMD Ryzen 5 5600 6-Core Processor",
+    "logicalCpuCount": 12,
+    "memoryGiB": 16,
+    "platform": "win32",
+    "release": "10.0.26200",
+    "node": "v24.22.1"
+  },
+  "browser": {
+    "baseline": {
+      "rooms": 5000,
+      "seedEvents": 60000,
+      "burstCount": 40,
+      "cpuThrottle": 4,
+      "startupMs": 11258.800000000745,
+      "searchMs": 905.2000000011176,
+      "syncMedianMs": 830.5999999996275,
+      "syncP95Ms": 1025.9000000003725,
+      "syncMaxMs": 1035.7000000011176,
+      "heapBeforeBytes": 25141896,
+      "heapAfterBytes": 26376400,
+      "longTaskCount": 74,
+      "longTaskMaxMs": 2301,
+      "browser": "chromium",
+      "fixture": "local IPC; Vite development build; not Synapse or native WebView2"
+    },
+    "optimized": {
+      "rooms": 5000,
+      "seedEvents": 60000,
+      "burstCount": 40,
+      "cpuThrottle": 4,
+      "startupMs": 3755.4000000003725,
+      "searchMs": 102.59999999962747,
+      "syncMedianMs": 132.2999999988824,
+      "syncP95Ms": 139.40000000037253,
+      "syncMaxMs": 149,
+      "heapBeforeBytes": 29315488,
+      "heapAfterBytes": 29952644,
+      "longTaskCount": 60,
+      "longTaskMaxMs": 859,
+      "browser": "chromium",
+      "fixture": "local IPC; Vite development build; not Synapse or native WebView2"
+    },
+    "extended500Bursts": {
+      "rooms": 5000,
+      "seedEvents": 60000,
+      "burstCount": 500,
+      "cpuThrottle": 4,
+      "startupMs": 4045.5999999996275,
+      "searchMs": 101.30000000074506,
+      "syncMedianMs": 132.5,
+      "syncP95Ms": 153.7000000011176,
+      "syncMaxMs": 465,
+      "heapBeforeBytes": 29316944,
+      "heapAfterBytes": 33287576,
+      "longTaskCount": 520,
+      "longTaskMaxMs": 931,
+      "browser": "chromium",
+      "fixture": "local IPC; Vite development build; not Synapse or native WebView2"
+    }
+  },
+  "sqlite": {
+    "baseline": {
+      "events": 100000,
+      "preview1000Ms": 59,
+      "profile": "cargo test dev; local SQLite, no Matrix network",
+      "read100000Ms": 747,
+      "rooms": 200,
+      "writeMs": 2866
+    },
+    "optimized": {
+      "events": 100000,
+      "preview1000Ms": 31,
+      "profile": "cargo test dev; local SQLite, no Matrix network",
+      "read100000Ms": 697,
+      "rooms": 200,
+      "writeMs": 1629
+    }
+  },
+  "checks": {
+    "functionalRust": 36,
+    "frontendUnit": 25,
+    "functionalBrowser": 35,
+    "loadBrowserScenarios": 2,
+    "sqliteLoadScenario": 1,
+    "sqliteConcurrentWriters": 4,
+    "baselineAndOptimizedBrowserComparedWithoutCompilation": true,
+    "extendedRunConcurrentWithBuilds": true
+  },
+  "limits": "Local IPC + Vite dev Chromium, CPU throttle 4. Native SQLite cargo test dev. No Synapse load, native WebView2/Android/crypto throughput or long endurance validation."
+}

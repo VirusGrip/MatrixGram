@@ -1,6 +1,6 @@
 {
   "name": "matrixgram",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "workspaces": [
     "apps/client"
@@ -12,7 +12,8 @@
     "test:e2e": "npm run test:e2e -w @matrixgram/client",
     "tauri": "npm run tauri -w @matrixgram/client --",
     "check:policy": "node scripts/check-policy.mjs",
-    "android:prepare": "node scripts/prepare-android.mjs"
+    "android:prepare": "node scripts/prepare-android.mjs",
+    "test:load": "npm exec -w @matrixgram/client -- playwright test --config playwright.load.config.ts"
   },
   "engines": {
     "node": ">=22"

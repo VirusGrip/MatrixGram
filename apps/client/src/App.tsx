@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowLeft, Check, CheckCheck, CircleAlert, Copy, Folder, Forward, Globe, Info, KeyRound, LockKeyhole, LogOut, Menu, MessageCircle, Mic, Moon, Paperclip, Pencil, Pin, Plus, Reply, Search, Send, ShieldOff, Smile, Sun, Trash2, Users, WifiOff, X } from 'lucide-react';
 import { api, nativeAvailable, onConnection, onUpdate } from './api';
@@ -20,8 +20,12 @@ import { RoomList } from './ChatList';
 import { RoomPreviews } from './RoomPreviews';
 import { presentRoom } from './roomPresentation';
 import { userTitle } from './contacts';
-const time = (ts: number) => new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-const date = (ts: number) => new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+import { cachedTimeline, emptyEvents } from './timelineCache';
+import { filterRooms } from './roomFilter';
+const timeFormat = new Intl.DateTimeFormat('ru-RU', {hour:'2-digit',minute:'2-digit'});
+const time = (ts: number) => timeFormat.format(ts);
+const dateFormat = new Intl.DateTimeFormat('ru-RU', {day:'numeric',month:'long'});
+const date = (ts: number) => dateFormat.format(ts);
 
 function Login({ loading }: { loading: boolean }) {
   const [server, setServer] = useState('https://matrix.mad-frog.ru');
@@ -58,7 +62,7 @@ function Login({ loading }: { loading: boolean }) {
       <p className="login-note"><KeyRound size={17}/>Зашифрованные комнаты можно открыть после входа.<br/>Восстановление ключей необязательно.</p>
       {!loading && nativeAvailable() && <Accounts savedOnly/>}
     </section>
-    <footer>MatrixGram · 0.5.0 · ранняя версия</footer>
+    <footer>MatrixGram · 0.5.1 · ранняя версия</footer>
   </main>;
 }
 
@@ -106,10 +110,10 @@ function Preferences({ close, theme, setTheme, openDirectory }: { close: () => v
   </Modal>;
 }
 
-function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummary; showInfo: boolean; toggleInfo: () => void; openEncryption: () => void }) {
+function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummary; showInfo: boolean; toggleInfo: () => void; openEncryption: () => void }) {
   const session = useStore(s => s.session)!;
   const raw = useStore(s => s.events[room.id]);
-  const messages = useMemo(() => projectTimeline(raw ?? []), [raw]);
+  const messages = useMemo(() => cachedTimeline(raw ?? emptyEvents), [raw]);
   const allPending = useStore(s => s.pending);
   const pending = allPending.filter(p => p.roomId === room.id);
   const cursor = useStore(s => s.cursors[room.id]);
@@ -136,8 +140,10 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
   useEffect(() => { let stale = false; if (room.membership === 'joined') void api.op<RoomDetails>('roomDetails', { roomId: room.id }).then(details => { if (!stale) { setMembers(details.members); setCanSend(details.canSend); } }).catch(() => {}); return () => { stale = true; }; }, [room.id, room.membership, session]);
   const typists = useStore(s => s.typing[room.id]), receipts = useStore(s => s.receipts[room.id]);
   const [clock, setClock] = useState(Date.now());
-  useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 2000); return () => clearInterval(timer); }, []);
-  const readThrough = Math.max(0, ...Object.entries(receipts ?? {}).filter(([, users]) => users.some(user => user !== session.userId)).map(([id]) => messages.find(message => message.id === id)?.ts ?? 0));
+  useEffect(() => { if (!typists?.users.length) return; setClock(Date.now()); const timer = setInterval(() => setClock(Date.now()), 2000); return () => clearInterval(timer); }, [typists]);
+  const messagesById = useMemo(() => new Map(messages.map(message => [message.id, message])), [messages]);
+  const membersById = useMemo(() => new Map(members.map(member => [member.userId, member])), [members]);
+  const readThrough = useMemo(() => { let latest = 0; for (const [id, users] of Object.entries(receipts ?? {})) if (users.some(user => user !== session.userId)) latest = Math.max(latest, messagesById.get(id)?.ts ?? 0); return latest; }, [receipts, messagesById, session.userId]);
   const draftReady = useRef(false), draftBody = useRef(''), editing = useRef(false), scroll = useRef<HTMLDivElement>(null), stick = useRef(true), initialScroll = useRef(true), typingAt = useRef(0);
   draftBody.current = body; editing.current = edit !== null;
   const filtered = useMemo(() => messages.filter(m => !find || m.body.toLocaleLowerCase().includes(find.toLocaleLowerCase())), [messages, find]);
@@ -233,7 +239,7 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
             const mine = message.sender === session.userId;
             const joinsPrevious = sameMessageGroup(previous, message);
             const joinsNext = sameMessageGroup(message, filtered[row.index + 1]);
-            const member = members.find(member => member.userId === message.sender);
+            const member = membersById.get(message.sender);
             const sender = userTitle(message.sender, member?.name || message.sender.split(':')[0].replace('@', ''), contactNames);
             return <div ref={rows.measureElement} data-index={row.index} key={message.id} className={`message-slot ${joinsPrevious ? 'group-continuation' : 'group-start'}`} style={{ transform: `translateY(${row.start - listOffset}px)` }}>
               {(!previous || date(previous.ts) !== date(message.ts)) && <div className="date-divider"><span>{date(message.ts)}</span></div>}
@@ -242,7 +248,7 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
               {!mine && <span className="message-avatar">{!joinsNext && <Avatar name={sender} url={member?.avatarUrl} size="tiny"/>}</span>}
               <article className={`bubble ${mine ? 'mine' : ''} ${message.deleted ? 'deleted' : ''} ${highlight === message.id ? 'highlight' : ''}`} onClick={e => { if (selecting && !(e.target as HTMLElement).closest('button,a,input,audio,video')) selectMessage(message); }} onContextMenu={e => { e.preventDefault(); setContext(message); }} aria-label={`Сообщение от ${message.sender}`}>
                 {!mine && !joinsPrevious && <button className="sender" onClick={() => setPerson(message.sender)}>{sender}</button>}
-                {message.replyTo && <blockquote>{messages.find(m => m.id === message.replyTo)?.body ?? 'Ответ на более раннее сообщение'}</blockquote>}
+                {message.replyTo && <blockquote>{messagesById.get(message.replyTo)?.body ?? 'Ответ на более раннее сообщение'}</blockquote>}
                 {message.attachment && <MediaView attachment={message.attachment}/>}
                 <div className="message-body"><div className="message-text">{!message.attachment && <FormattedText html={message.formattedBody} fallback={message.body} onMention={setPerson}/>}</div><span className="message-meta">{message.edited && 'изменено · '}{time(message.ts)}{mine && (readThrough >= message.ts ? <CheckCheck size={14} aria-label="Прочитано"/> : <Check size={14} aria-label="Отправлено на сервер"/>)}</span></div>
                 {message.reactions.length > 0 && <div className="reactions">{message.reactions.map(r => <span key={r.key}>{r.key} {r.count}</span>)}</div>}
@@ -287,6 +293,8 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
   </section>;
 }
 
+const Chat = memo(ChatView, (previous, next) => previous.showInfo === next.showInfo && previous.toggleInfo === next.toggleInfo && previous.openEncryption === next.openEncryption && (Object.keys({...previous.room, ...next.room}) as (keyof RoomSummary)[]).every(key => previous.room[key] === next.room[key]));
+
 export default function App() {
   const incomingShare = useIncomingShare();
   const session = useStore(s => s.session), serverRooms = useStore(s => s.rooms), activeRoom = useStore(s => s.activeRoom), error = useStore(s => s.error), connection = useStore(s => s.connection);
@@ -312,7 +320,7 @@ export default function App() {
   };
   const folders = useStore(s => s.folders), encryption = useStore(s => s.encryption);
   const contactNames = useStore(s => s.contactNames);
-  const rooms = useMemo(() => serverRooms.map(room => presentRoom(room, allEvents[room.id] || [], encryption.enabled, contactNames)), [serverRooms, allEvents, encryption.enabled, contactNames]);
+  const rooms = useMemo(() => serverRooms.map(room => presentRoom(room, allEvents[room.id] || emptyEvents, encryption.enabled, contactNames)), [serverRooms, allEvents, encryption.enabled, contactNames]);
   const pinKey = `matrixgram.pins.${session?.homeserver}.${session?.userId}`;
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('matrixgram.theme', theme); }, [theme]);
   useEffect(() => { try { const value: unknown = JSON.parse(localStorage.getItem(pinKey) ?? '[]'); setPins(Array.isArray(value) ? value.filter(v => typeof v === 'string') : []); } catch { setPins([]); } }, [pinKey]);
@@ -332,12 +340,14 @@ export default function App() {
     })().catch(e => { if (!disposed) useStore.getState().setError(e); }).finally(() => { if (!disposed) setBooting(false); });
     return () => { disposed = true; cleanup.forEach(fn => fn()); };
   }, []);
+  const originals = useMemo(() => new Map(serverRooms.map(room => [room.id, room])), [serverRooms]);
   const room = rooms.find(r => r.id === activeRoom);
   const shown = useMemo(() => {
     const folder = folders.find(f => f.id === activeFolder);
-    return rooms.filter(r => [r.name, r.directUserId || '', serverRooms.find(raw => raw.id === r.id)?.name || ''].some(name => name.toLocaleLowerCase().includes(search.toLocaleLowerCase())) && (tab !== 'unread' || r.unread > 0) && (tab !== 'pinned' || pins.includes(r.id)) && (!folder || folder.roomIds.includes(r.id) && (!folder.unreadOnly || r.unread > 0)))
-      .sort((a, b) => Number(pins.includes(b.id)) - Number(pins.includes(a.id)) || b.lastTs - a.lastTs || a.name.localeCompare(b.name));
-  }, [rooms, serverRooms, search, tab, pins, folders, activeFolder]);
+    return filterRooms(rooms, originals, search, tab, pins, folder);
+  }, [rooms, originals, search, tab, pins, folders, activeFolder]);
+  const toggleInfo = useCallback(() => setInfo(value => !value), []);
+  const openEncryption = useCallback(() => setEncryptionOpen(true), []);
   if (!session) return <Login loading={booting}/>;
   function togglePin(id: string) { const value = pins.includes(id) ? pins.filter(p => p !== id) : [...pins, id]; setPins(value); localStorage.setItem(pinKey, JSON.stringify(value)); }
   const unreadChats = rooms.filter(r => r.unread > 0).length;
@@ -367,7 +377,7 @@ export default function App() {
         onPointerUp={e => { resizeStart.current = null; e.currentTarget.releasePointerCapture(e.pointerId); }} onLostPointerCapture={() => { resizeStart.current = null; }}
         onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); resizeSidebar(e.key === 'Home' ? 280 : e.key === 'End' ? 640 : sidebarWidth + (e.key === 'ArrowRight' ? 20 : -20)); } }}/>
     </aside>
-    {room ? <Chat key={`chat:${room.id}`} room={room} showInfo={info} toggleInfo={() => setInfo(!info)} openEncryption={() => setEncryptionOpen(true)}/> : <section className="welcome"><div className="welcome-icon"><MessageCircle size={50} strokeWidth={1.4}/></div><span className="eyebrow">ОБЩЕНИЕ БЕЗ ЛИШНЕГО</span><h2>На связи.<br/>В своей сети.</h2><p>Выберите чат слева<br/>или начните новый разговор.</p><button className="primary" onClick={() => setCreating(true)}><Plus size={18}/>Новая комната</button><span className="welcome-server"><span/>{session.homeserver.replace('https://', '').replace(/\/$/, '')}</span></section>}
+    {room ? <Chat key={`chat:${room.id}`} room={room} showInfo={info} toggleInfo={toggleInfo} openEncryption={openEncryption}/> : <section className="welcome"><div className="welcome-icon"><MessageCircle size={50} strokeWidth={1.4}/></div><span className="eyebrow">ОБЩЕНИЕ БЕЗ ЛИШНЕГО</span><h2>На связи.<br/>В своей сети.</h2><p>Выберите чат слева<br/>или начните новый разговор.</p><button className="primary" onClick={() => setCreating(true)}><Plus size={18}/>Новая комната</button><span className="welcome-server"><span/>{session.homeserver.replace('https://', '').replace(/\/$/, '')}</span></section>}
     {room && info && <RoomInfo key={`info:${room.id}`} room={room} messages={projectTimeline(allEvents[room.id] ?? [])} close={() => setInfo(false)}/>}
     {error && <div className="toast" role="alert"><CircleAlert size={20}/><span>{error}</span><button className="icon-button" aria-label="Закрыть уведомление" onClick={() => useStore.getState().setError(null)}><X size={18}/></button></div>}
     {creating && <CreateRoom close={() => setCreating(false)}/>}

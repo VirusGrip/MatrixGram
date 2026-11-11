@@ -23,6 +23,7 @@ interface Store {
   clear: () => void;
 }
 const empty = { session: null, rooms: [], activeRoom: null, events: {}, cursors: {}, pending: [], connection: 'connecting', error: null, encryption: { enabled: false, backupReady: false }, folders: [], typing: {}, receipts: {} };
+const historyRequests = new WeakMap<SessionInfo, Map<string, Promise<void>>>();
 export const useStore = create<Store>((set, get) => ({
   ...empty, contactNames: {},
   setSession: session => set({ session, contactNames: session ? readContactNames(session) : {} }),
@@ -61,22 +62,33 @@ export const useStore = create<Store>((set, get) => ({
         receipts[ephemeral.roomId] = current;
       }
     }
+    const pending = state.pending.filter(p => !receivedTxn.has(p.txn) && !(p.eventId && receivedIds.has(p.eventId)));
     set({ rooms: update.rooms, events, connection: update.connection, error: update.error,
       typing, receipts,
-      pending: state.pending.filter(p => !receivedTxn.has(p.txn) && !(p.eventId && receivedIds.has(p.eventId))) });
+      pending: pending.length === state.pending.length ? state.pending : pending });
   },
   select: activeRoom => set({ activeRoom }),
-  load: async (id, older = false) => {
+  load: (id, older = false) => {
     const session = get().session;
-    if (!session) return;
-    if (!older) {
-      const cached = await api.cached(id);
+    if (!session) return Promise.resolve();
+    let requests = historyRequests.get(session);
+    if (!requests) { requests = new Map(); historyRequests.set(session, requests); }
+    const key = JSON.stringify([id, older, older ? get().cursors[id] ?? null : null]);
+    const existing = requests.get(key); if (existing) return existing;
+    const request = (async () => {
+      if (!older) {
+        const cached = await api.cached(id);
+        if (get().session !== session) return;
+        set(s => ({ events: { ...s.events, [id]: mergeEvents(s.events[id] ?? [], cached) } }));
+      }
+      const page = await api.history(id, older ? get().cursors[id] ?? null : null);
       if (get().session !== session) return;
-      set(s => ({ events: { ...s.events, [id]: mergeEvents(s.events[id] ?? [], cached) } }));
-    }
-    const page = await api.history(id, older ? get().cursors[id] ?? null : null);
-    if (get().session !== session) return;
-    set(s => ({ events: { ...s.events, [id]: mergeEvents(s.events[id] ?? [], page.events) }, cursors: { ...s.cursors, [id]: page.next } }));
+      set(s => ({ events: { ...s.events, [id]: mergeEvents(s.events[id] ?? [], page.events) }, cursors: { ...s.cursors, [id]: page.next } }));
+    })();
+    requests.set(key, request);
+    const complete = () => { requests.delete(key); };
+    void request.then(complete, complete);
+    return request;
   },
   send: async (roomId, body, replyTo, existingTxn) => {
     const session = get().session;

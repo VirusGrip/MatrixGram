@@ -1,4 +1,4 @@
-# Android 0.5.0
+# Android 0.5.1
 
 Клиент использует общий Rust SDK и React UI. В исходниках есть JNI bridge для Android Keystore, TLS verifier, разрешений, системного сохранения, Back и ACTION_SEND/ACTION_SEND_MULTIPLE. Браузерный viewport не подтверждает работу APK на телефоне. Статус APK указан в PROGRESS.md.
 

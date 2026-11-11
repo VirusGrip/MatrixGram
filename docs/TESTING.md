@@ -1,4 +1,4 @@
-# Проверки 0.5.0
+# Проверки 0.5.1
 
 Фактические числа и артефакты зафиксированы в PROGRESS.md. Тесты ниже запускаются локально; они не входят в production приложение.
 
@@ -23,3 +23,12 @@
 9. Android arm64: startup/TLS/login, restore через Keystore, Back/keyboard/rotation/share/save, permission denial, background limitations. Debug APK не считается проверенным телефоном.
 
 Учётные данные пользователя, действующий TURN и реальные переписки в автоматических проверках не использовались. Нет подтверждения чистой установки, физического Android, реального E2EE recovery пользователя, real TURN/Element или системных уведомлений. Не подменять эти пункты результатом mock-тестов.
+
+## Нагрузка
+
+```powershell
+npm run test:load
+cargo test --workspace --locked cache_load_100000_events -- --ignored --nocapture
+```
+
+Нагрузочные тесты отделены от обычного Playwright-набора. Используется локальный IPC, не Synapse. JSON отчёт браузера: `apps/client/performance-results/browser-current.json`; native метрики печатаются как `LOAD_CACHE_JSON`. Профиль, пороги, параметры длительного прогона и пределы интерпретации — [PERFORMANCE.md](PERFORMANCE.md). Windows workflow содержит эти шаги, но на GitHub в этой разработке не запускался.

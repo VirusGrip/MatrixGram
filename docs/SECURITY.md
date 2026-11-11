@@ -1,4 +1,4 @@
-# Безопасность 0.5.0
+# Безопасность 0.5.1
 
 E2EE возвращено по указанию владельца. SDK 0.19.1 имеет e2e-encryption и SQLite crypto-store; default features отключены. check:policy проверяет crypto features, запрет автоматического bootstrap backup/cross-signing и CSP.
 

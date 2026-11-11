@@ -28,6 +28,14 @@ jobs:
       - run: npm run check:policy
       - run: npm exec -w @matrixgram/client -- playwright install chromium
       - run: npm run test:e2e
+      - run: cargo test --workspace --locked cache_load_100000_events -- --ignored --nocapture
+      - run: npm run test:load
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: MatrixGram-performance
+          path: apps/client/performance-results/*.json
+          if-no-files-found: warn
       - run: ./scripts/build-windows.ps1
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - uses: actions/upload-artifact@v4
