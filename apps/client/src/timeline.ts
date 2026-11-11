@@ -15,7 +15,7 @@ export function mergeEvents(existing: MatrixEvent[], incoming: MatrixEvent[]): M
     const previous = map.get(event.event_id);
     // A later history page must never restore already redacted content.
     if (previous?.unsigned?.redacted_because && !event.unsigned?.redacted_because) continue;
-    if (event.type === 'm.room.encrypted' && previous?.type === 'm.room.message') continue;
+    if (event.type === 'm.room.encrypted' && previous?.type === 'm.room.message' && !event.unsigned?.redacted_because) continue;
     map.set(event.event_id, event);
   }
   return [...map.values()].sort((a, b) => a.origin_server_ts - b.origin_server_ts || a.event_id.localeCompare(b.event_id));

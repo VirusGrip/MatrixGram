@@ -44,6 +44,12 @@ describe('Matrix event projection', () => {
     const ciphertext = { ...message, type: 'm.room.encrypted', content: { ciphertext: 'opaque' } };
     expect(mergeEvents([message], [ciphertext])[0]).toEqual(message);
   });
+  it('applies encrypted redaction over a previously decrypted event', () => {
+    const redacted = { ...message, type: 'm.room.encrypted', content: {}, unsigned: { redacted_because: {} } };
+    const merged = mergeEvents([message], [redacted]);
+    expect(projectTimeline(merged)[0].body).toBe('Сообщение удалено');
+    expect(projectTimeline(merged)[0].deleted).toBe(true);
+  });
   it('never displays ciphertext as a normal message', () => {
     const result = projectTimeline([event('$secret', 'm.room.encrypted', { body: 'ciphertext', ciphertext: 'secret' })]);
     expect(result[0].encrypted).toBe(true);

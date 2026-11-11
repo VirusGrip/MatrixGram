@@ -6,6 +6,7 @@ export interface RoomSummary {
   encryption: 'encrypted' | 'unencrypted' | 'unknown'; unread: number; members: number;
   lastBody: string | null; lastTs: number;
   avatarUrl?: string | null;
+  directUserId?: string | null;
 }
 export interface MatrixEvent {
   event_id: string; sender: string; type: string; origin_server_ts: number;

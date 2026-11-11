@@ -4,6 +4,7 @@ import { Mic, MicOff, Phone, PhoneOff, MonitorUp, Video, VideoOff, X } from 'luc
 import { api } from './api';
 import { CallEngine, type CallState } from './callEngine';
 import { useStore } from './store';
+import { roomTitle } from './contacts';
 import { errorText } from './ui';
 import type { RoomDetails, RoomSummary } from './models';
 
@@ -14,6 +15,7 @@ function StreamVideo({ stream, muted = false }: { stream?: MediaStream; muted?: 
   return <video ref={ref} autoPlay playsInline muted={muted}/>;
 }
 export function CallService() {
+  const names = useStore(s => s.contactNames);
   const session = useStore(s => s.session), events = useStore(s => s.events), rooms = useStore(s => s.rooms);
   const call = useCalls(s => s.state), engine = useCalls(s => s.engine);
   const [muted, setMuted] = useState(false), [cameraOff, setCameraOff] = useState(false), [now, setNow] = useState(Date.now()), [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -32,7 +34,7 @@ export function CallService() {
   if (!call) return null;
   const room = rooms.find(room => room.id === call.roomId);
   const elapsed = call.started ? Math.max(0, Math.floor((now - call.started) / 1000)) : 0;
-  return <section className="call-overlay" role="dialog" aria-label="Звонок"><header><span>{room?.name || 'MatrixGram'}</span>{call.error && <button className="icon-button" aria-label="Закрыть звонок" onClick={() => useCalls.setState({ state: null })}><X size={20}/></button>}</header><h2>{call.status}</h2>{call.started && <p>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}</p>}{call.error && <p role="alert">{call.error}</p>}
+  return <section className="call-overlay" role="dialog" aria-label="Звонок"><header><span>{room ? roomTitle(room, names) : 'MatrixGram'}</span>{call.error && <button className="icon-button" aria-label="Закрыть звонок" onClick={() => useCalls.setState({ state: null })}><X size={20}/></button>}</header><h2>{call.status}</h2>{call.started && <p>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}</p>}{call.error && <p role="alert">{call.error}</p>}
     {call.video && <div className="call-videos"><StreamVideo stream={call.remote} muted/><div className="local-video"><StreamVideo stream={call.local} muted/></div></div>}
     <audio ref={remoteAudio} autoPlay/>
     <div className="call-controls">{call.direction === 'incoming' && !call.local && <button className="answer-call" aria-label="Ответить на звонок" onClick={() => { void engine?.answer(); }}><Phone size={23}/></button>}{call.local && <><button aria-label={muted ? 'Включить микрофон' : 'Выключить микрофон'} onClick={() => { engine?.mute('audio', !muted); setMuted(!muted); }}>{muted ? <MicOff/> : <Mic/>}</button>{call.video && <><button aria-label={cameraOff ? 'Включить камеру' : 'Выключить камеру'} onClick={() => { engine?.mute('video', !cameraOff); setCameraOff(!cameraOff); }}>{cameraOff ? <VideoOff/> : <Video/>}</button>{typeof navigator.mediaDevices?.getDisplayMedia === 'function' && <button aria-label="Показать экран" onClick={() => { void engine?.screenshare().catch(e => useStore.getState().setError(e)); }}><MonitorUp/></button>}</>}</>}{!call.error && <button className="end-call" aria-label="Завершить звонок" onClick={() => { void engine?.hangup(); }}><PhoneOff size={24}/></button>}</div>

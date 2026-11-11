@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { ArrowDown, ArrowUp, Check, KeyRound, MessageCircle, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { api } from './api';
 import { useStore } from './store';
+import { roomTitle, userTitle } from './contacts';
 import { Avatar, Modal, errorText } from './ui';
 import type { ChatFolder, EncryptionStatus, UserSearchResult } from './models';
 
@@ -58,6 +59,7 @@ export function EncryptionDialog({ close }: { close: () => void }) {
 }
 
 export function PeopleSearch({ close }: { close: () => void }) {
+  const names = useStore(s => s.contactNames);
   const [term, setTerm] = useState(''), [result, setResult] = useState<UserSearchResult>({ users: [], limited: false });
   const [loading, setLoading] = useState(false), [opening, setOpening] = useState(''), [error, setError] = useState('');
   useEffect(() => {
@@ -81,8 +83,8 @@ export function PeopleSearch({ close }: { close: () => void }) {
   return <Modal title="Поиск пользователей" close={close}>
     <label>Имя, фамилия или Matrix ID<input autoFocus autoComplete="off" value={term} onChange={e => setTerm(e.target.value)} maxLength={128} placeholder="Например, Иванов"/></label>
     <div className="people-results" aria-live="polite">
-      {loading ? <p className="feature-empty">Ищем пользователей…</p> : result.users.length ? result.users.map(user => <button className="person-result" key={user.userId} disabled={!!opening} onClick={() => { void open(user.userId); }} aria-label={`Написать ${user.displayName}`}>
-        <Avatar name={user.displayName}/><span><strong>{user.displayName}</strong><small>{user.userId}</small></span><MessageCircle size={19}/>
+      {loading ? <p className="feature-empty">Ищем пользователей…</p> : result.users.length ? result.users.map(user => <button className="person-result" key={user.userId} disabled={!!opening} onClick={() => { void open(user.userId); }} aria-label={`Написать ${userTitle(user.userId, user.displayName, names)}`}>
+        <Avatar name={userTitle(user.userId, user.displayName, names)}/><span><strong>{userTitle(user.userId, user.displayName, names)}</strong><small>{user.userId}</small></span><MessageCircle size={19}/>
       </button>) : <div className="feature-empty"><Search size={25}/><p>{term.trim().length < 2 ? 'Введите хотя бы 2 символа' : 'Пользователи не найдены'}</p></div>}
     </div>
     {error && <p className="form-error" role="alert">{error}</p>}
@@ -92,7 +94,8 @@ export function PeopleSearch({ close }: { close: () => void }) {
 }
 
 export function FolderManager({ close }: { close: () => void }) {
-  const rooms = useStore(s => s.rooms), folders = useStore(s => s.folders);
+  const names = useStore(s => s.contactNames);
+  const rooms = useStore(s => s.rooms).map(room => ({...room,name:roomTitle(room,names)})), folders = useStore(s => s.folders);
   const [editing, setEditing] = useState<string | null>(null), [name, setName] = useState(''), [chosen, setChosen] = useState<string[]>([]), [unread, setUnread] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   async function save(value: ChatFolder[]) {

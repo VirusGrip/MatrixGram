@@ -28,7 +28,7 @@ jobs:
       - run: npm run check:policy
       - run: npm exec -w @matrixgram/client -- playwright install chromium
       - run: npm run test:e2e
-      - run: npm run tauri -- build --bundles nsis
+      - run: ./scripts/build-windows.ps1
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - uses: actions/upload-artifact@v4
         with:

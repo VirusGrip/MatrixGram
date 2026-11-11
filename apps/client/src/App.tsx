@@ -16,6 +16,10 @@ import { Accounts } from './Accounts';
 import { TransferService, useUploads } from './Transfers';
 import { useIncomingShare } from './IncomingShare';
 import { HistorySearch } from './HistorySearch';
+import { RoomList } from './ChatList';
+import { RoomPreviews } from './RoomPreviews';
+import { presentRoom } from './roomPresentation';
+import { userTitle } from './contacts';
 const time = (ts: number) => new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 const date = (ts: number) => new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 
@@ -54,29 +58,8 @@ function Login({ loading }: { loading: boolean }) {
       <p className="login-note"><KeyRound size={17}/>Зашифрованные комнаты можно открыть после входа.<br/>Восстановление ключей необязательно.</p>
       {!loading && nativeAvailable() && <Accounts savedOnly/>}
     </section>
-    <footer>MatrixGram · 0.4.0 · ранняя версия</footer>
+    <footer>MatrixGram · 0.5.0 · ранняя версия</footer>
   </main>;
-}
-
-function RoomList({ rooms, selected, pins, select, togglePin }: { rooms: RoomSummary[]; selected: string | null; pins: string[]; select: (id: string) => void; togglePin: (id: string) => void }) {
-  const parent = useRef<HTMLDivElement>(null);
-  const rows = useVirtualizer({ count: rooms.length, getScrollElement: () => parent.current, estimateSize: () => 68, overscan: 6 });
-  return <div className="room-list" ref={parent} aria-label="Список чатов">
-    {!rooms.length && <div className="list-empty"><MessageCircle size={30}/><p>Здесь появятся ваши чаты</p><small>Дождитесь синхронизации или создайте комнату</small></div>}
-    <div style={{ height: rows.getTotalSize(), position: 'relative' }}>
-      {rows.getVirtualItems().map(row => {
-        const room = rooms[row.index];
-        return <div className={`room-row ${selected === room.id ? 'selected' : ''}`} key={room.id} style={{ transform: `translateY(${row.start}px)` }}>
-          <button className="room-select" onClick={() => select(room.id)} aria-label={`Открыть ${room.name}`}>
-            <Avatar name={room.name} url={room.avatarUrl}/><span className="room-copy"><span className="room-top"><strong>{room.encryption === 'encrypted' && <LockKeyhole size={12}/>} {room.name}</strong><time>{room.lastTs ? time(room.lastTs) : ''}</time></span>
-              <span className="room-bottom"><span>{room.membership === 'invited' ? 'Приглашение в комнату' : room.encryption === 'encrypted' ? 'Зашифрованная переписка' : room.lastBody || 'Пока нет сообщений'}</span>{room.unread > 0 && <b className="badge">{room.unread}</b>}</span>
-            </span>
-          </button>
-          <button className={`pin-button ${pins.includes(room.id) ? 'pinned' : ''}`} aria-label={`${pins.includes(room.id) ? 'Открепить' : 'Закрепить'} ${room.name}`} onClick={() => togglePin(room.id)}><Pin size={12}/></button>
-        </div>;
-      })}
-    </div>
-  </div>;
 }
 
 function CreateRoom({ close }: { close: () => void }) {
@@ -135,7 +118,18 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
   const [find, setFind] = useState(''), [searchOpen, setSearchOpen] = useState(false);
   const [serverSearch, setServerSearch] = useState(false), [highlight, setHighlight] = useState('');
   const focusMessage = useRef<string | null>(null);
-  const [forward, setForward] = useState<Message | null>(null), [person, setPerson] = useState(''), [files, setFiles] = useState<File[]>([]), [recording, setRecording] = useState(false), [emoji, setEmoji] = useState(false), [markdown, setMarkdown] = useState(false), [context, setContext] = useState<Message | null>(null);
+  const [forward, setForward] = useState<Message[] | null>(null), [person, setPerson] = useState(''), [files, setFiles] = useState<File[]>([]), [recording, setRecording] = useState(false), [emoji, setEmoji] = useState(false), [markdown, setMarkdown] = useState(false), [context, setContext] = useState<Message | null>(null);
+  const contactNames = useStore(s => s.contactNames);
+  const [selecting, setSelecting] = useState(false), [selected, setSelected] = useState<Set<string>>(new Set());
+  const selectedMessages = useMemo(() => messages.filter(message => selected.has(message.id) && !message.deleted && !message.encrypted), [messages, selected]);
+  const eligible = useMemo(() => messages.filter(message => !message.deleted && !message.encrypted), [messages]);
+  useEffect(() => { const available = new Set(eligible.map(message => message.id)); setSelected(current => { const remaining = new Set([...current].filter(id => available.has(id))); return remaining.size === current.size ? current : remaining; }); }, [eligible]);
+  function clearSelection() { setSelecting(false); setSelected(new Set()); }
+  function selectMessage(message: Message) {
+    if (message.deleted || message.encrypted) return;
+    setSelected(current => { const value = new Set(current); if (value.has(message.id)) value.delete(message.id); else if (value.size < 100) value.add(message.id); return value; });
+  }
+  useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !document.querySelector('dialog[open]')) clearSelection(); }; if (selecting) window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape); }, [selecting]);
   const fileInput = useRef<HTMLInputElement>(null);
   const hasTransfers = useUploads(s => s.tasks.some(task => task.roomId === room.id));
   const [members, setMembers] = useState<Member[]>([]), [canSend, setCanSend] = useState(true);
@@ -219,12 +213,14 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
   return <section className="chat-panel" onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }} onDrop={e => { if (e.dataTransfer.files.length && !blocked && canSend) { e.preventDefault(); setFiles([...e.dataTransfer.files]); } }}>
     <header className="chat-header">
       <button className="icon-button back-button" aria-label="Назад к чатам" onClick={() => useStore.getState().select(null)}><ArrowLeft/></button>
+      {room.directUserId && <button className="chat-avatar" aria-label="Профиль собеседника" onClick={() => setPerson(room.directUserId!)}><Avatar name={room.name} url={room.avatarUrl} size="small"/></button>}
       <button className="chat-heading" onClick={toggleInfo} aria-label={`О чате ${room.name}`}><h2>{room.name}</h2><span>{typists && typists.expires > clock && typists.users.length ? `${typists.users.map(id => id.split(':')[0].slice(1)).join(', ')} печатает…` : room.membership === 'invited' ? 'Вас пригласили' : memberLabel(room.members) || (room.encryption === 'encrypted' ? 'Зашифрованная переписка' : 'Переписка')}</span></button>
       {room.encryption === 'encrypted' && <button className="icon-button" aria-label="Ключи комнаты" onClick={openEncryption}><KeyRound size={20}/></button>}
       {!blocked && <CallButtons room={room}/>}
       <button className="icon-button" aria-label="Поиск в загруженных сообщениях" onClick={() => setSearchOpen(!searchOpen)}><Search size={21}/></button>
       <button className={`icon-button ${showInfo ? 'accent' : ''}`} aria-label="Информация о комнате" onClick={toggleInfo}><Info size={21}/></button>
     </header>
+    {selecting && <div className="selection-toolbar" role="toolbar" aria-label="Выбранные сообщения"><strong>Выбрано: {selectedMessages.length} / 100</strong><button className="text-button" onClick={() => setSelected(new Set(eligible.slice(0,100).map(message => message.id)))}>Выделить загруженные</button><button className="text-button" disabled={!selectedMessages.length} onClick={() => setForward(selectedMessages)}><Forward size={17}/>Переслать выбранные</button><button className="icon-button" aria-label="Отменить выделение" onClick={clearSelection}><X size={19}/></button></div>}
     {searchOpen && <div className="chat-search"><Search size={17}/><input autoFocus placeholder="Поиск в загруженной истории" value={find} onChange={e => setFind(e.target.value)}/>{room.encryption !== 'encrypted' && <button className="text-button" disabled={find.trim().length < 2} onClick={() => setServerSearch(true)}>Вся история</button>}<button className="icon-button" aria-label="Закрыть поиск" onClick={() => { setSearchOpen(false); setFind(''); }}><X size={18}/></button></div>}
     {room.membership === 'invited' ? <div className="chat-state"><Users size={42}/><h2>Приглашение в комнату</h2><p>{room.name}</p><button className="primary" onClick={() => { void api.join(room.id).then(async () => useStore.setState({ rooms: await api.rooms() })).catch(e => useStore.getState().setError(e)); }}>Вступить</button></div> : blocked ? <div className="chat-state"><LockKeyhole size={44}/><h2>Зашифрованная комната</h2><p>Откройте доступные сообщения сейчас.<br/>Ключи для старой истории можно подключить позже.</p><button className="primary" onClick={openEncryption}>Открыть зашифрованные комнаты</button></div> : <>
       <div className="timeline" ref={scroll} onScroll={() => { const el = scroll.current; if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120; }} aria-label="Сообщения">
@@ -238,21 +234,22 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
             const joinsPrevious = sameMessageGroup(previous, message);
             const joinsNext = sameMessageGroup(message, filtered[row.index + 1]);
             const member = members.find(member => member.userId === message.sender);
-            const sender = member?.name || message.sender.split(':')[0].replace('@', '');
+            const sender = userTitle(message.sender, member?.name || message.sender.split(':')[0].replace('@', ''), contactNames);
             return <div ref={rows.measureElement} data-index={row.index} key={message.id} className={`message-slot ${joinsPrevious ? 'group-continuation' : 'group-start'}`} style={{ transform: `translateY(${row.start - listOffset}px)` }}>
               {(!previous || date(previous.ts) !== date(message.ts)) && <div className="date-divider"><span>{date(message.ts)}</span></div>}
-              <div className={`message-row ${mine ? 'outgoing' : 'incoming'} ${joinsNext ? '' : 'group-end'}`}>
+              <div className={`message-row ${selected.has(message.id) ? 'selected-message' : ''} ${mine ? 'outgoing' : 'incoming'} ${joinsNext ? '' : 'group-end'}`}>
+              {selecting && <input className="select-message" type="checkbox" aria-label={`Выбрать: ${message.body.slice(0,70)}`} checked={selected.has(message.id)} disabled={message.deleted || message.encrypted || (!selected.has(message.id) && selected.size >= 100)} onChange={() => selectMessage(message)}/>}
               {!mine && <span className="message-avatar">{!joinsNext && <Avatar name={sender} url={member?.avatarUrl} size="tiny"/>}</span>}
-              <article className={`bubble ${mine ? 'mine' : ''} ${message.deleted ? 'deleted' : ''} ${highlight === message.id ? 'highlight' : ''}`} onContextMenu={e => { e.preventDefault(); setContext(message); }} aria-label={`Сообщение от ${message.sender}`}>
+              <article className={`bubble ${mine ? 'mine' : ''} ${message.deleted ? 'deleted' : ''} ${highlight === message.id ? 'highlight' : ''}`} onClick={e => { if (selecting && !(e.target as HTMLElement).closest('button,a,input,audio,video')) selectMessage(message); }} onContextMenu={e => { e.preventDefault(); setContext(message); }} aria-label={`Сообщение от ${message.sender}`}>
                 {!mine && !joinsPrevious && <button className="sender" onClick={() => setPerson(message.sender)}>{sender}</button>}
                 {message.replyTo && <blockquote>{messages.find(m => m.id === message.replyTo)?.body ?? 'Ответ на более раннее сообщение'}</blockquote>}
                 {message.attachment && <MediaView attachment={message.attachment}/>}
                 <div className="message-body"><div className="message-text">{!message.attachment && <FormattedText html={message.formattedBody} fallback={message.body} onMention={setPerson}/>}</div><span className="message-meta">{message.edited && 'изменено · '}{time(message.ts)}{mine && (readThrough >= message.ts ? <CheckCheck size={14} aria-label="Прочитано"/> : <Check size={14} aria-label="Отправлено на сервер"/>)}</span></div>
                 {message.reactions.length > 0 && <div className="reactions">{message.reactions.map(r => <span key={r.key}>{r.key} {r.count}</span>)}</div>}
-                {!message.deleted && !message.encrypted && <div className="message-actions">
+                {!selecting && !message.deleted && !message.encrypted && <div className="message-actions">
                   <button title="Ответить" aria-label="Ответить" onClick={() => { setReply(message); setEdit(null); }}><Reply size={15}/></button>
                   <button title="Реакция 👍" aria-label="Реакция 👍" onClick={() => { void api.react(room.id, message.id, '👍').catch(e => useStore.getState().setError(e)); }}>👍</button>
-                  <button title="Переслать" aria-label="Переслать" onClick={() => setForward(message)}><Forward size={15}/></button>
+                  <button title="Переслать" aria-label="Переслать" onClick={() => setForward([message])}><Forward size={15}/></button>
                   <button title="Ещё действия" aria-label="Ещё действия" onClick={() => setContext(message)}>···</button>
                   {mine && <>{!message.attachment && <button title="Редактировать" aria-label="Редактировать" onClick={() => { setEdit(message); setReply(null); setBody(message.body); }}><Pencil size={14}/></button>}<button title="Удалить" aria-label="Удалить" onClick={() => setDeleting(message)}><Trash2 size={14}/></button></>}
                 </div>}
@@ -283,16 +280,16 @@ function Chat({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSummar
       </form>}
     </>}
     {deleting && <Modal title="Удалить сообщение?" close={() => setDeleting(null)}><p>Сообщение будет удалено для участников комнаты через Matrix.</p><div className="modal-actions"><button className="text-button" onClick={() => setDeleting(null)}>Отмена</button><button className="danger" onClick={() => { void api.redact(room.id, deleting.id).then(() => setDeleting(null)).catch(e => useStore.getState().setError(e)); }}>Удалить</button></div></Modal>}
-    {forward && <ForwardDialog message={forward} sourceRoom={room.id} close={() => setForward(null)}/>}
+    {forward && <ForwardDialog messages={forward} sourceRoom={room.id} close={() => setForward(null)} completed={clearSelection}/>}
     {person && <PersonProfile userId={person} close={() => setPerson('')}/>}
     {serverSearch && <HistorySearch room={room} initial={find} close={() => setServerSearch(false)} locate={event => { focusMessage.current = event.event_id; setHighlight(event.event_id); setFind(''); useStore.setState(s => ({ events: { ...s.events, [room.id]: mergeEvents(s.events[room.id] ?? [], [event]) } })); }}/>}
-    {context && <Modal title="Действия с сообщением" close={() => setContext(null)}><div className="message-menu"><button onClick={() => { void navigator.clipboard.writeText(context.body).then(() => setContext(null)).catch(e => useStore.getState().setError(e)); }}><Copy size={17}/>Копировать текст</button><button onClick={() => { void navigator.clipboard.writeText(`https://matrix.to/#/${encodeURIComponent(room.id)}/${encodeURIComponent(context.id)}`).then(() => setContext(null)); }}>Копировать ссылку</button><button onClick={() => { setReply(context); setContext(null); }}><Reply size={17}/>Ответить</button><button onClick={() => { setForward(context); setContext(null); }}><Forward size={17}/>Переслать</button><button onClick={() => { void api.op('pin', { roomId: room.id, eventId: context.id, pinned: true }).then(() => setContext(null)).catch(e => useStore.getState().setError(e)); }}><Pin size={17}/>Закрепить</button><div className="reaction-picker">{['👍','❤️','😂','🔥','🎉','😢','👀','🙏'].map(value => <button key={value} onClick={() => { void api.react(room.id, context.id, value).then(() => setContext(null)).catch(e => useStore.getState().setError(e)); }}>{value}</button>)}</div><button onClick={() => { void api.op<string[]>('readBy', { roomId: room.id, eventId: context.id }).then(users => window.alert(users.length ? `Прочитали:\n${users.join('\n')}` : 'Отметок прочтения пока нет')).catch(e => useStore.getState().setError(e)); }}>Кто прочитал</button></div></Modal>}
+    {context && <Modal title="Действия с сообщением" close={() => setContext(null)}><div className="message-menu">{!context.deleted && !context.encrypted && <button onClick={() => { setSelecting(true); setSelected(current => current.has(context.id) || current.size >= 100 ? current : new Set([...current, context.id])); setContext(null); }}><Check size={17}/>Выделить сообщение</button>}<button onClick={() => { void navigator.clipboard.writeText(context.body).then(() => setContext(null)).catch(e => useStore.getState().setError(e)); }}><Copy size={17}/>Копировать текст</button><button onClick={() => { void navigator.clipboard.writeText(`https://matrix.to/#/${encodeURIComponent(room.id)}/${encodeURIComponent(context.id)}`).then(() => setContext(null)); }}>Копировать ссылку</button><button onClick={() => { setReply(context); setContext(null); }}><Reply size={17}/>Ответить</button><button onClick={() => { setForward([context]); setContext(null); }}><Forward size={17}/>Переслать</button><button onClick={() => { void api.op('pin', { roomId: room.id, eventId: context.id, pinned: true }).then(() => setContext(null)).catch(e => useStore.getState().setError(e)); }}><Pin size={17}/>Закрепить</button><div className="reaction-picker">{['👍','❤️','😂','🔥','🎉','😢','👀','🙏'].map(value => <button key={value} onClick={() => { void api.react(room.id, context.id, value).then(() => setContext(null)).catch(e => useStore.getState().setError(e)); }}>{value}</button>)}</div><button onClick={() => { void api.op<string[]>('readBy', { roomId: room.id, eventId: context.id }).then(users => window.alert(users.length ? `Прочитали:\n${users.join('\n')}` : 'Отметок прочтения пока нет')).catch(e => useStore.getState().setError(e)); }}>Кто прочитал</button></div></Modal>}
   </section>;
 }
 
 export default function App() {
   const incomingShare = useIncomingShare();
-  const session = useStore(s => s.session), rooms = useStore(s => s.rooms), activeRoom = useStore(s => s.activeRoom), error = useStore(s => s.error), connection = useStore(s => s.connection);
+  const session = useStore(s => s.session), serverRooms = useStore(s => s.rooms), activeRoom = useStore(s => s.activeRoom), error = useStore(s => s.error), connection = useStore(s => s.connection);
   const [booting, setBooting] = useState(nativeAvailable()), [search, setSearch] = useState(''), [tab, setTab] = useState('all');
   const [creating, setCreating] = useState(false), [settings, setSettings] = useState(false), [info, setInfo] = useState(false);
   const [theme, setThemeValue] = useState(localStorage.getItem('matrixgram.theme') ?? 'light');
@@ -314,6 +311,8 @@ export default function App() {
     setSidebarWidth(width); localStorage.setItem('matrixgram.sidebarWidth', String(width));
   };
   const folders = useStore(s => s.folders), encryption = useStore(s => s.encryption);
+  const contactNames = useStore(s => s.contactNames);
+  const rooms = useMemo(() => serverRooms.map(room => presentRoom(room, allEvents[room.id] || [], encryption.enabled, contactNames)), [serverRooms, allEvents, encryption.enabled, contactNames]);
   const pinKey = `matrixgram.pins.${session?.homeserver}.${session?.userId}`;
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('matrixgram.theme', theme); }, [theme]);
   useEffect(() => { try { const value: unknown = JSON.parse(localStorage.getItem(pinKey) ?? '[]'); setPins(Array.isArray(value) ? value.filter(v => typeof v === 'string') : []); } catch { setPins([]); } }, [pinKey]);
@@ -336,9 +335,9 @@ export default function App() {
   const room = rooms.find(r => r.id === activeRoom);
   const shown = useMemo(() => {
     const folder = folders.find(f => f.id === activeFolder);
-    return rooms.filter(r => r.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) && (tab !== 'unread' || r.unread > 0) && (tab !== 'pinned' || pins.includes(r.id)) && (!folder || folder.roomIds.includes(r.id) && (!folder.unreadOnly || r.unread > 0)))
-      .sort((a, b) => Number(pins.includes(b.id)) - Number(pins.includes(a.id)));
-  }, [rooms, search, tab, pins, folders, activeFolder]);
+    return rooms.filter(r => [r.name, r.directUserId || '', serverRooms.find(raw => raw.id === r.id)?.name || ''].some(name => name.toLocaleLowerCase().includes(search.toLocaleLowerCase())) && (tab !== 'unread' || r.unread > 0) && (tab !== 'pinned' || pins.includes(r.id)) && (!folder || folder.roomIds.includes(r.id) && (!folder.unreadOnly || r.unread > 0)))
+      .sort((a, b) => Number(pins.includes(b.id)) - Number(pins.includes(a.id)) || b.lastTs - a.lastTs || a.name.localeCompare(b.name));
+  }, [rooms, serverRooms, search, tab, pins, folders, activeFolder]);
   if (!session) return <Login loading={booting}/>;
   function togglePin(id: string) { const value = pins.includes(id) ? pins.filter(p => p !== id) : [...pins, id]; setPins(value); localStorage.setItem(pinKey, JSON.stringify(value)); }
   const unreadChats = rooms.filter(r => r.unread > 0).length;
@@ -368,8 +367,8 @@ export default function App() {
         onPointerUp={e => { resizeStart.current = null; e.currentTarget.releasePointerCapture(e.pointerId); }} onLostPointerCapture={() => { resizeStart.current = null; }}
         onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); resizeSidebar(e.key === 'Home' ? 280 : e.key === 'End' ? 640 : sidebarWidth + (e.key === 'ArrowRight' ? 20 : -20)); } }}/>
     </aside>
-    {room ? <Chat key={room.id} room={room} showInfo={info} toggleInfo={() => setInfo(!info)} openEncryption={() => setEncryptionOpen(true)}/> : <section className="welcome"><div className="welcome-icon"><MessageCircle size={50} strokeWidth={1.4}/></div><span className="eyebrow">ОБЩЕНИЕ БЕЗ ЛИШНЕГО</span><h2>На связи.<br/>В своей сети.</h2><p>Выберите чат слева<br/>или начните новый разговор.</p><button className="primary" onClick={() => setCreating(true)}><Plus size={18}/>Новая комната</button><span className="welcome-server"><span/>{session.homeserver.replace('https://', '').replace(/\/$/, '')}</span></section>}
-    {room && info && <RoomInfo key={room.id} room={room} messages={projectTimeline(allEvents[room.id] ?? [])} close={() => setInfo(false)}/>}
+    {room ? <Chat key={`chat:${room.id}`} room={room} showInfo={info} toggleInfo={() => setInfo(!info)} openEncryption={() => setEncryptionOpen(true)}/> : <section className="welcome"><div className="welcome-icon"><MessageCircle size={50} strokeWidth={1.4}/></div><span className="eyebrow">ОБЩЕНИЕ БЕЗ ЛИШНЕГО</span><h2>На связи.<br/>В своей сети.</h2><p>Выберите чат слева<br/>или начните новый разговор.</p><button className="primary" onClick={() => setCreating(true)}><Plus size={18}/>Новая комната</button><span className="welcome-server"><span/>{session.homeserver.replace('https://', '').replace(/\/$/, '')}</span></section>}
+    {room && info && <RoomInfo key={`info:${room.id}`} room={room} messages={projectTimeline(allEvents[room.id] ?? [])} close={() => setInfo(false)}/>}
     {error && <div className="toast" role="alert"><CircleAlert size={20}/><span>{error}</span><button className="icon-button" aria-label="Закрыть уведомление" onClick={() => useStore.getState().setError(null)}><X size={18}/></button></div>}
     {creating && <CreateRoom close={() => setCreating(false)}/>}
     {settings && <Preferences close={() => setSettings(false)} theme={theme} setTheme={setThemeValue} openDirectory={() => { setSettings(false); setDirectoryOpen(true); }}/>}
@@ -379,6 +378,7 @@ export default function App() {
     {directoryOpen && <RoomDirectory close={() => setDirectoryOpen(false)}/>}
     <CallService/>
     <TransferService/>
+    <RoomPreviews/>
     {incomingShare}
   </main>;
 }

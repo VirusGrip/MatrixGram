@@ -18,7 +18,7 @@ const mediaStore={};
 const pixel='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
 const publish=roomId=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[{roomId,events,next:null}],connection:'online',error:null}));
 export const api = {
- bootstrap:async()=>null, login:async()=>{setTimeout(()=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[],connection:'online',error:null})),30);return session}, rooms:async()=>rooms, logout:async()=>{}, forget:async()=>{},
+ bootstrap:async()=>null, login:async()=>{setTimeout(()=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[],connection:'online',error:null})),30);return session}, rooms:async()=>[...rooms], logout:async()=>{}, forget:async()=>{},
  cached:async id=>id==='!plain:test'?events:[], history:async id=>{if(id==='!secret:test')window.__secretHistoryCount=(window.__secretHistoryCount||0)+1;return {roomId:id,events:id==='!plain:test'?events:id==='!secret:test'&&encryption.enabled?[{event_id:'$secret',sender:'@bob:test',type:'m.room.message',origin_server_ts:2000,content:{body:'Открытое сообщение E2EE'}}]:[],next:null}},
  draft:async id=>drafts[id]||'',saveDraft:async(id,body)=>{drafts[id]=body},typing:async()=>{},read:async()=>{},
  send:async(roomId,body,txn,replyTo)=>{
@@ -359,7 +359,7 @@ test('two WebRTC peers exchange RTP through Matrix signalling and stop media on 
 test('switching accounts clears the previous timeline and ignores old account events', async ({ page }) => {
   const adapter=fixtureApi.replace('accounts:async()=>({entries:[],active:null})', `accounts:async()=>({entries:[{id:'alice',userId:'@alice:test',homeserver:'https://matrix.test'},{id:'bob',userId:'@bob:test',homeserver:'https://matrix.test'}],active:window.__activeAccount||'alice'})`)
     .replace('switchAccount:async()=>session', `switchAccount:async id=>{window.__activeAccount=id;return {...session,userId:'@bob:test',deviceId:'BOB'}}`)
-    .replace('rooms:async()=>rooms', `rooms:async()=>window.__activeAccount==='bob'?[{id:'!bob:test',name:'Личный чат Bob',membership:'joined',encryption:'unencrypted',unread:0,members:1,lastBody:null,lastTs:0}]:rooms`);
+    .replace('rooms:async()=>[...rooms]', `rooms:async()=>window.__activeAccount==='bob'?[{id:'!bob:test',name:'Личный чат Bob',membership:'joined',encryption:'unencrypted',unread:0,members:1,lastBody:null,lastTs:0}]:rooms`);
   await login(page,adapter);await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
   await expect(page.locator('.message-text').filter({hasText:'Привет, команда!'})).toBeVisible();
   await page.getByRole('button',{name:'Настройки',exact:true}).click();
@@ -440,7 +440,7 @@ test('interface scale stays inside the desktop and mobile viewport', async ({ pa
 test('room refresh failure after switching never restores the old account identity', async ({ page }) => {
   const adapter=fixtureApi.replace('accounts:async()=>({entries:[],active:null})', `accounts:async()=>({entries:[{id:'alice',userId:'@alice:test',homeserver:'https://matrix.test'},{id:'bob',userId:'@bob:test',homeserver:'https://matrix.test'}],active:window.__activeAccount||'alice'})`)
     .replace('switchAccount:async()=>session', `switchAccount:async id=>{window.__activeAccount=id;return {...session,userId:'@bob:test',deviceId:'BOB'}}`)
-    .replace('rooms:async()=>rooms', `rooms:async()=>{if(window.__activeAccount==='bob')throw new Error('Нет сети');return rooms}`);
+    .replace('rooms:async()=>[...rooms]', `rooms:async()=>{if(window.__activeAccount==='bob')throw new Error('Нет сети');return rooms}`);
   await login(page,adapter); await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
   await page.getByRole('button',{name:'Настройки',exact:true}).click();
   await page.locator('.accounts-panel').getByRole('button',{name:'@bob:test https://matrix.test'}).click();
@@ -462,4 +462,99 @@ test('a delayed incoming call cannot reopen after its account session is dispose
   await expect.poll(()=>page.evaluate(()=>typeof (window as any).__disposedCall.release)).toBe('function');
   await page.evaluate(async ()=>{const p=(window as any).__disposedCall;p.engine.dispose();p.release(true);await p.engine.queue;});
   expect(await page.evaluate(()=>(window as any).__disposedCall.states)).toEqual([null]);
+});
+
+test('unlocked encrypted chats show last text in the list without opening each room', async ({ page }) => {
+  await login(page);
+  const row=page.getByRole('button',{name:'Открыть Закрытая комната'});
+  await expect(row).toContainText('Зашифрованная переписка');
+  expect(await page.evaluate(()=>(window as any).__secretHistoryCount||0)).toBe(0);
+  await page.getByRole('button',{name:'Открыть зашифрованные комнаты',exact:true}).click();
+  await page.getByRole('button',{name:'Открыть доступные сообщения без ключа'}).click();
+  await expect(row).toContainText('Открытое сообщение E2EE');
+  await expect(row).not.toContainText('Зашифрованная переписка');
+  expect(await page.evaluate(()=>Object.values(localStorage).some(value=>String(value).includes('Открытое сообщение E2EE')))).toBe(false);
+});
+
+test('switching chats with information open keeps a single correctly placed conversation', async ({ page }) => {
+  const errors:string[]=[];page.on('console',message=>{if(message.type()==='error')errors.push(message.text())});
+  await page.setViewportSize({width:1286,height:900});await login(page);
+  await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await page.getByRole('button',{name:'Информация о комнате',exact:true}).click();
+  for(let i=0;i<5;i++) {
+    await page.getByRole('button',{name:'Открыть Закрытая комната'}).click();
+    await expect(page.locator('.chat-panel')).toHaveCount(1);await expect(page.locator('.room-info')).toHaveCount(1);
+    await expect(page.locator('.chat-heading h2')).toHaveText('Закрытая комната');
+    await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+    await expect(page.locator('.chat-panel')).toHaveCount(1);await expect(page.locator('.composer')).toHaveCount(1);
+  }
+  const boxes=await page.evaluate(()=>{const rect=(selector:string)=>{const b=document.querySelector(selector)!.getBoundingClientRect();return {x:b.x,y:b.y,right:b.right,bottom:b.bottom}};return {rail:rect('.rail'),side:rect('.sidebar'),chat:rect('.chat-panel'),info:rect('.room-info')}});
+  expect(boxes.rail.x).toBe(0);expect(boxes.side.x).toBeGreaterThan(60);expect(boxes.chat.x).toBeCloseTo(boxes.side.right,0);expect(boxes.info.x).toBeCloseTo(boxes.chat.right,0);
+  expect(boxes.info.y).toBe(0);expect(boxes.chat.bottom).toBe(900);
+  await page.screenshot({path:'test-results/room-switch-fixed.png'});
+  expect(errors.filter(error=>/same key|unique.*key|Encountered two children/i.test(error))).toEqual([]);
+});
+
+const dmFixture=fixtureApi.replace("name:'Закрытая комната'","name:'Борис Сидоров',directUserId:'@bob:test',avatarUrl:'mxc://test/bob-photo'")
+  .replace("name:'Команда Matrix'","name:'Команда Matrix',avatarUrl:'mxc://test/group-photo'")
+  .replace('media:async source=>({data:mediaStore[source.url]||pixel})','media:async source=>{window.__mediaRequests=[...(window.__mediaRequests||[]),source.url];return {data:mediaStore[source.url]||pixel}}');
+
+test('DM photo is shown in list and heading while groups keep their own cover', async ({ page }) => {
+  await login(page,dmFixture);
+  await expect(page.getByRole('button',{name:'Открыть Борис Сидоров'}).locator('.avatar img')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Открыть Команда Matrix'}).locator('.avatar img')).toBeVisible();
+  await page.getByRole('button',{name:'Открыть Борис Сидоров'}).click();
+  await expect(page.getByRole('button',{name:'Профиль собеседника'}).locator('img')).toBeVisible();
+  expect(await page.evaluate(()=>(window as any).__mediaRequests)).toEqual(expect.arrayContaining(['mxc://test/bob-photo','mxc://test/group-photo']));
+  await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await expect(page.getByRole('button',{name:'Профиль собеседника'})).toHaveCount(0);
+});
+
+test('personal contact names survive restart, do not change Matrix profiles and stay isolated by account', async ({ page }) => {
+  const adapter=dmFixture.replace('accounts:async()=>({entries:[],active:null})', `accounts:async()=>({entries:[{id:'alice',userId:'@alice:test',homeserver:'https://matrix.test'},{id:'carol',userId:'@carol:test',homeserver:'https://matrix.test'}],active:window.__activeAccount||'alice'})`)
+    .replace('switchAccount:async()=>session',`switchAccount:async id=>{window.__activeAccount=id;return {...session,userId:'@carol:test',deviceId:'CAROL'}}`);
+  await login(page,adapter);await page.getByRole('button',{name:'Открыть Борис Сидоров'}).click();
+  await page.getByRole('button',{name:'Профиль собеседника'}).click();
+  await page.getByLabel('Моя подпись контакта').fill('Мой бухгалтер');await page.getByRole('button',{name:'Сохранить подпись',exact:true}).click();
+  await expect(page.getByRole('status')).toContainText('Подпись сохранена');
+  await page.getByRole('dialog').getByRole('button',{name:'Закрыть',exact:true}).click();
+  await expect(page.locator('.chat-heading h2')).toHaveText('Мой бухгалтер');
+  expect(await page.evaluate(()=>(window as any).__operations.some((op:any)=>op.kind==='setProfile'))).toBe(false);
+  await login(page,adapter);await expect(page.getByRole('button',{name:'Открыть Мой бухгалтер'})).toBeVisible();
+  await page.getByRole('button',{name:'Настройки',exact:true}).click();await page.locator('.accounts-panel').getByRole('button',{name:'@carol:test https://matrix.test'}).click();
+  await expect(page.getByRole('button',{name:'Открыть Борис Сидоров'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Открыть Мой бухгалтер'})).toHaveCount(0);
+});
+
+test('chat can be pinned from its context menu and pinned filter persists', async ({ page }) => {
+  await login(page);await page.getByRole('button',{name:'Открыть Команда Matrix'}).click({button:'right'});
+  await page.getByRole('button',{name:'Закрепить чат',exact:true}).click();
+  await page.getByRole('button',{name:'Закреплённые чаты',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Открыть Команда Matrix'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Открыть Закрытая комната'})).toHaveCount(0);
+  await login(page);await expect(page.getByRole('button',{name:'Открепить Команда Matrix'})).toBeVisible();
+  await page.getByRole('button',{name:'Открыть Команда Matrix'}).click({button:'right'});await page.getByRole('button',{name:'Открепить чат',exact:true}).click();
+  await page.getByRole('button',{name:'Закреплённые чаты',exact:true}).click();await expect(page.getByRole('button',{name:'Открыть Команда Matrix'})).toHaveCount(0);
+});
+
+test('selected messages forward together in chronological order', async ({ page }) => {
+  await login(page,withMessages([['@bob:test','Первое'],['@alice:test','Второе'],['@bob:test','Третье']]));await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await page.locator('.bubble').nth(2).click({button:'right'});await page.getByRole('button',{name:'Выделить сообщение',exact:true}).click();
+  await page.getByLabel('Выбрать: Первое', {exact:true}).check();
+  await expect(page.getByRole('toolbar',{name:'Выбранные сообщения'})).toContainText('Выбрано: 2');
+  await page.getByRole('button',{name:'Переслать выбранные',exact:true}).click();
+  await page.getByRole('dialog',{name:'Переслать сообщения'}).getByRole('button',{name:'Команда Matrix',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByRole('toolbar',{name:'Выбранные сообщения'})).toHaveCount(0);
+  expect(await page.evaluate(()=>(window as any).__operations.filter((op:any)=>op.kind==='forward').map((op:any)=>op.eventId))).toEqual(['$visual0','$visual2']);
+});
+
+test('partial batch retry skips delivered messages and reuses the failed transaction ID', async ({ page }) => {
+  const adapter=withMessages([['@bob:test','Первое'],['@bob:test','Второе'],['@bob:test','Третье']]).replace("if(kind==='roomDetails')",`if(kind==='forward'&&args.eventId==='$visual1'&&!window.__failedForward){window.__failedForward=true;throw new Error('Нет сети')}if(kind==='roomDetails')`);
+  await login(page,adapter);await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await expect(page.locator('.bubble')).toHaveCount(3);await page.locator('.bubble').first().getByText('Первое',{exact:true}).click({button:'right',timeout:5000});await page.getByRole('button',{name:'Выделить сообщение',exact:true}).click();
+  await page.getByRole('button',{name:'Выделить загруженные',exact:true}).click();await page.getByRole('button',{name:'Переслать выбранные',exact:true}).click();
+  await page.getByRole('dialog').getByRole('button',{name:'Команда Matrix',exact:true}).click();await expect(page.getByRole('alert')).toContainText('Повтор продолжит');
+  await page.getByRole('button',{name:'Продолжить пересылку в Команда Matrix',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
+  const sent=await page.evaluate(()=>(window as any).__operations.filter((op:any)=>op.kind==='forward'));
+  expect(sent.map((op:any)=>op.eventId)).toEqual(['$visual0','$visual1','$visual1','$visual2']);expect(sent[1].txn).toBe(sent[2].txn);
 });

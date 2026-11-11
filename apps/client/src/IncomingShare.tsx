@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { useStore } from './store';
 import { enqueueFiles } from './Transfers';
 import { Avatar, Modal } from './ui';
+import { roomTitle } from './contacts';
 declare global { interface Window { matrixgramShareReady?: boolean; matrixgramBack?: () => boolean } }
 export function useIncomingShare() {
+  const names = useStore(s => s.contactNames);
   const session = useStore(s => s.session), rooms = useStore(s => s.rooms);
   const [incoming, setIncoming] = useState<{ text: string; files: File[] } | null>(null);
   useEffect(() => {
@@ -25,7 +27,7 @@ export function useIncomingShare() {
     };
     window.addEventListener('matrixgram-share', handler);
     window.matrixgramBack = () => {
-      const dialog = document.querySelector('dialog[open]');
+      const dialog = [...document.querySelectorAll('dialog[open]')].at(-1);
       if (dialog) { dialog.dispatchEvent(new Event('cancel', { cancelable: true })); return true; }
       if (document.querySelector('.call-overlay')) return true;
       if (useStore.getState().activeRoom) { useStore.getState().select(null); return true; }
@@ -34,5 +36,5 @@ export function useIncomingShare() {
     return () => { window.removeEventListener('matrixgram-share', handler); delete window.matrixgramShareReady; delete window.matrixgramBack; };
   }, []);
   if (!session || !incoming) return null;
-  return <Modal title="Поделиться в MatrixGram" close={() => setIncoming(null)}><p className="share-preview">{incoming.text || incoming.files.map(file => file.name).join(', ')}</p><p className="muted">Выберите получателя. Будет отправлено файлов: {incoming.files.length}.</p><div className="forward-rooms">{rooms.filter(room => room.membership === 'joined').map(room => <button key={room.id} aria-label={`Отправить в ${room.name}`} onClick={() => { const payload = incoming; setIncoming(null); useStore.getState().select(room.id); if (payload.files.length) enqueueFiles(room.id, payload.files); if (payload.text) void useStore.getState().send(room.id, payload.text); }}><Avatar name={room.name} url={room.avatarUrl} size="small"/>{room.name}</button>)}</div></Modal>;
+  return <Modal title="Поделиться в MatrixGram" close={() => setIncoming(null)}><p className="share-preview">{incoming.text || incoming.files.map(file => file.name).join(', ')}</p><p className="muted">Выберите получателя. Будет отправлено файлов: {incoming.files.length}.</p><div className="forward-rooms">{rooms.filter(room => room.membership === 'joined').map(room => <button key={room.id} aria-label={`Отправить в ${roomTitle(room,names)}`} onClick={() => { const payload = incoming; setIncoming(null); useStore.getState().select(room.id); if (payload.files.length) enqueueFiles(room.id, payload.files); if (payload.text) void useStore.getState().send(room.id, payload.text); }}><Avatar name={roomTitle(room,names)} url={room.avatarUrl} size="small"/>{roomTitle(room,names)}</button>)}</div></Modal>;
 }

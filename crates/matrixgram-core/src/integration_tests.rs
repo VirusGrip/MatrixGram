@@ -11,6 +11,48 @@ struct Fixture {
 }
 
 #[tokio::test]
+async fn direct_chat_uses_peer_avatar_and_two_member_group_keeps_room_avatar() {
+    let f = fixture(false).await;
+    let mut response = sync_response(false);
+    response["next_batch"] = json!("group-avatar");
+    response["rooms"]["join"]["!test:example.org"]["summary"]["m.joined_member_count"] = json!(2);
+    let state = response["rooms"]["join"]["!test:example.org"]["state"]["events"]
+        .as_array_mut()
+        .unwrap();
+    state.push(json!({"type":"m.room.member","state_key":"@bob:example.org","sender":"@bob:example.org","event_id":"$bob","origin_server_ts":12,"content":{"membership":"join","displayname":"Bob","avatar_url":"mxc://example.org/bob-photo"}}));
+    state.push(json!({"type":"m.room.avatar","state_key":"","sender":"@alice:example.org","event_id":"$avatar","origin_server_ts":13,"content":{"url":"mxc://example.org/group-photo"}}));
+    Mock::given(method("GET"))
+        .and(path("/_matrix/client/v3/sync"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response.clone()))
+        .with_priority(2)
+        .mount(&f.server)
+        .await;
+    f.account.sync_once().await.unwrap();
+    let group = f.account.rooms().await.unwrap().remove(0);
+    assert!(group.direct_user_id.is_none());
+    assert_eq!(
+        group.avatar_url.as_deref(),
+        Some("mxc://example.org/group-photo")
+    );
+    response["next_batch"] = json!("dm-avatar");
+    response["account_data"]["events"] =
+        json!([{"type":"m.direct","content":{"@bob:example.org":["!test:example.org"]}}]);
+    Mock::given(method("GET"))
+        .and(path("/_matrix/client/v3/sync"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response))
+        .with_priority(1)
+        .mount(&f.server)
+        .await;
+    f.account.sync_once().await.unwrap();
+    let direct = f.account.rooms().await.unwrap().remove(0);
+    assert_eq!(direct.direct_user_id.as_deref(), Some("@bob:example.org"));
+    assert_eq!(
+        direct.avatar_url.as_deref(),
+        Some("mxc://example.org/bob-photo")
+    );
+}
+
+#[tokio::test]
 async fn forwards_drop_reply_links_and_do_not_repeat_mentions() {
     use crate::operations::Operation;
     let f = fixture(false).await;

@@ -26,6 +26,8 @@ pub struct RoomSummary {
     pub last_ts: i64,
     #[serde(default)]
     pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub direct_user_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

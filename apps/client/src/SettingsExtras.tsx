@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
+import { useStore } from './store';
+import { roomTitle } from './contacts';
 import { errorText } from './ui';
 
 export function DesktopPreferences() {
@@ -28,7 +30,7 @@ export function notifyMessages(key: string, update: import('./models').Update, q
       seen.add(event.event_id);
       if (quiet || event.sender === key.split('|')[0] || event.type !== 'm.room.message' || event.unsigned?.redacted_because || event.content['m.relates_to'] || Date.now() - event.origin_server_ts > 120_000 || muted || document.hasFocus()) continue;
       const text = localStorage.getItem('matrixgram.preview') === 'on' ? String(event.content.body || 'Вложение') : 'Новое сообщение';
-      void api.notify(room?.name || 'MatrixGram', text).catch(() => {});
+      void api.notify(room ? roomTitle(room, useStore.getState().contactNames) : 'MatrixGram', text).catch(() => {});
       if (!played && localStorage.getItem('matrixgram.sound') !== 'off') {
         played = true;
         try { const context = new AudioContext(), oscillator = context.createOscillator(), gain = context.createGain(); gain.gain.setValueAtTime(.06, context.currentTime); gain.gain.exponentialRampToValueAtTime(.001, context.currentTime + .18); oscillator.frequency.value = 720; oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + .2); oscillator.onended = () => { void context.close(); }; } catch { /* User gesture may be needed to unlock audio. */ }

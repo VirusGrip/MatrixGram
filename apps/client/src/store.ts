@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { api } from './api';
 import { mergeEvents } from './timeline';
+import { contactKey, readContactNames, type ContactNames } from './contacts';
 import type { MatrixEvent, RoomSummary, SessionInfo, Update, PendingMessage, EncryptionStatus, ChatFolder } from './models';
 
 interface Store {
@@ -10,6 +11,8 @@ interface Store {
   encryption: EncryptionStatus; folders: ChatFolder[];
   typing: Record<string, { users: string[]; expires: number }>;
   receipts: Record<string, Record<string, string[]>>;
+  contactNames: ContactNames;
+  setContactName: (userId: string, name: string) => void;
   loadFeatures: () => Promise<void>;
   setSession: (session: SessionInfo | null) => void;
   setError: (error: unknown) => void;
@@ -21,8 +24,15 @@ interface Store {
 }
 const empty = { session: null, rooms: [], activeRoom: null, events: {}, cursors: {}, pending: [], connection: 'connecting', error: null, encryption: { enabled: false, backupReady: false }, folders: [], typing: {}, receipts: {} };
 export const useStore = create<Store>((set, get) => ({
-  ...empty,
-  setSession: session => set({ session }),
+  ...empty, contactNames: {},
+  setSession: session => set({ session, contactNames: session ? readContactNames(session) : {} }),
+  setContactName: (userId, name) => {
+    const session = get().session; if (!session) return;
+    if (!/^@[^:]+:.+$/.test(userId)) throw new Error('Некорректный Matrix ID');
+    name = name.trim(); if ([...name].length > 100) throw new Error('Подпись — до 100 символов');
+    const contactNames = { ...get().contactNames }; if (name) contactNames[userId] = name; else delete contactNames[userId];
+    localStorage.setItem(contactKey(session), JSON.stringify(contactNames)); set({ contactNames });
+  },
   loadFeatures: async () => {
     const session = get().session;
     const [encryption, folders] = await Promise.all([api.encryptionStatus(), api.folders()]);
@@ -85,5 +95,5 @@ export const useStore = create<Store>((set, get) => ({
       return false;
     }
   },
-  clear: () => set({ ...empty, events: {}, cursors: {}, pending: [] }),
+  clear: () => set({ ...empty, events: {}, cursors: {}, pending: [], contactNames: {} }),
 }));

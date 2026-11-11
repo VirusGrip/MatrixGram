@@ -269,9 +269,40 @@ impl Account {
                 _ => "unknown",
             };
             let (last_body, last_ts) = if encryption == "encrypted" {
-                (None, 0)
+                // Message bodies are projected in UI memory after decryption, never persisted here.
+                (
+                    None,
+                    room.latest_event_timestamp()
+                        .map(|ts| u64::from(ts.get()) as i64)
+                        .unwrap_or(0),
+                )
             } else {
                 self.cache.last_message(room.room_id().as_str())?
+            };
+            // m.direct identifies a DM; a two-person group remains a group.
+            let direct_user = if room.active_members_count() <= 2 {
+                let mut targets = room
+                    .direct_targets()
+                    .iter()
+                    .filter_map(|id| matrix_sdk::ruma::OwnedUserId::try_from(id).ok())
+                    .filter(|id| id.as_str() != self.info.user_id)
+                    .collect::<Vec<_>>();
+                if targets.len() == 1 {
+                    targets.pop()
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let avatar_url = if let Some(id) = &direct_user {
+                room.get_member_no_sync(id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|member| member.avatar_url().map(ToString::to_string))
+            } else {
+                room.avatar_url().map(|url| url.to_string())
             };
             result.push(RoomSummary {
                 id: room.room_id().to_string(),
@@ -292,7 +323,8 @@ impl Account {
                 members: room.joined_members_count(),
                 last_body,
                 last_ts,
-                avatar_url: room.avatar_url().map(|u| u.to_string()),
+                avatar_url,
+                direct_user_id: direct_user.map(|id| id.to_string()),
             });
         }
         result.sort_by(|a, b| b.last_ts.cmp(&a.last_ts).then_with(|| a.name.cmp(&b.name)));
