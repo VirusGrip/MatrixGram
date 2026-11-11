@@ -164,3 +164,4 @@ body { zoom: var(--ui-scale, 1); }
 
 .app-updates .text-button, .app-updates .primary { display: inline-flex; gap: 8px; align-items: center; }
 .update-notes { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow-y: auto; font-size: 13px; }
+.invitations-banner{display:flex;align-items:center;gap:10px;width:100%;padding:12px 16px;color:var(--accent);background:var(--surface);border-bottom:1px solid var(--line);flex-shrink:0;text-align:left}.invitations-banner span{flex:1}.invitations-banner:hover{background:var(--hover)}

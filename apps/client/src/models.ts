@@ -7,6 +7,7 @@ export interface RoomSummary {
   lastBody: string | null; lastTs: number;
   avatarUrl?: string | null;
   directUserId?: string | null;
+  inviter?: SenderProfile | null;
 }
 export interface MatrixEvent {
   event_id: string; sender: string; type: string; origin_server_ts: number;
@@ -14,7 +15,8 @@ export interface MatrixEvent {
   redacts?: string;
   unsigned?: { redacted_because?: unknown; transaction_id?: string };
 }
-export interface TimelinePage { roomId: string; events: MatrixEvent[]; next: string | null }
+export interface SenderProfile { userId: string; name: string; avatarUrl?: string | null }
+export interface TimelinePage { roomId: string; events: MatrixEvent[]; next: string | null; profiles?: SenderProfile[]; canSend?: boolean }
 export interface Update { rooms: RoomSummary[]; timelines: TimelinePage[]; connection: string; error: string | null; ephemeral?: { roomId: string; type: string; content: Record<string, unknown> }[] }
 export interface EncryptionStatus { enabled: boolean; backupReady: boolean }
 export interface ChatFolder { id: string; name: string; roomIds: string[]; unreadOnly: boolean }

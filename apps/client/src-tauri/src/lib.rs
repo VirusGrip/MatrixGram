@@ -230,11 +230,15 @@ async fn rooms(state: State<'_, Backend>) -> Result<Vec<RoomSummary>, String> {
 }
 
 #[tauri::command]
-async fn cached_timeline(state: State<'_, Backend>, room_id: String) -> Result<Vec<Value>, String> {
+async fn cached_timeline(
+    state: State<'_, Backend>,
+    room_id: String,
+) -> Result<TimelinePage, String> {
     state
         .account()
         .await?
-        .cached_timeline(&room_id)
+        .cached_page(&room_id)
+        .await
         .map_err(|e| e.to_string())
 }
 

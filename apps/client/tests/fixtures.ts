@@ -15,13 +15,14 @@ let encryption = {enabled:false,backupReady:false};
 let folders = JSON.parse(localStorage.getItem('test-folders') || '[]');
 let pinned=[];let profileName='Alice';let notificationMode='Some(AllMessages)';
 const mediaStore={};
+const profiles=[{userId:'@alice:test',name:'Alice'},{userId:'@bob:test',name:'Bob'}];
 const pixel='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
 const publish=roomId=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[{roomId,events,next:null}],connection:'online',error:null}));
 export const api = {
  updateStatus:async()=>({currentVersion:'0.5.2',configured:false,platform:'windows',repository:'VirusGrip/MatrixGram',available:null}),
  checkUpdate:async()=>({currentVersion:'0.5.2',configured:true,platform:'windows',repository:'VirusGrip/MatrixGram',available:null}),downloadUpdate:async()=>{},installUpdate:async()=>{window.__updateInstalled=true;return 'started'},
  bootstrap:async()=>null, login:async()=>{setTimeout(()=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[],connection:'online',error:null})),30);return session}, rooms:async()=>[...rooms], logout:async()=>{}, forget:async()=>{},
- cached:async id=>id==='!plain:test'?events:[], history:async id=>{if(id==='!secret:test')window.__secretHistoryCount=(window.__secretHistoryCount||0)+1;return {roomId:id,events:id==='!plain:test'?events:id==='!secret:test'&&encryption.enabled?[{event_id:'$secret',sender:'@bob:test',type:'m.room.message',origin_server_ts:2000,content:{body:'Открытое сообщение E2EE'}}]:[],next:null}},
+ cached:async id=>({roomId:id,events:id==='!plain:test'?events:[],next:null,profiles,canSend:true}), history:async id=>{if(id==='!secret:test')window.__secretHistoryCount=(window.__secretHistoryCount||0)+1;return {roomId:id,events:id==='!plain:test'?events:id==='!secret:test'&&encryption.enabled?[{event_id:'$secret',sender:'@bob:test',type:'m.room.message',origin_server_ts:2000,content:{body:'Открытое сообщение E2EE'}}]:[],next:null,profiles,canSend:true}},
  draft:async id=>drafts[id]||'',saveDraft:async(id,body)=>{drafts[id]=body},typing:async()=>{},read:async()=>{},
  send:async(roomId,body,txn,replyTo)=>{
    window.__sendCount=(window.__sendCount||0)+1;
@@ -32,7 +33,7 @@ export const api = {
    setTimeout(()=>updates.forEach(update=>update(session.userId+'|'+session.deviceId, {rooms,timelines:[{roomId,events,next:null}],connection:'online',error:null})),20);
    return id;
  },
- edit:async()=>{},react:async()=>{},redact:async()=>{},create:async()=>{throw new Error('Тест: нет прав')},join:async()=>{},
+ edit:async()=>{},react:async()=>{},redact:async()=>{},create:async()=>{throw new Error('Тест: нет прав')},join:async id=>{const room=rooms.find(room=>room.id===id);if(room)room.membership='joined'},
  encryptionStatus:async()=>encryption,enableEncryption:async()=>encryption={enabled:true,backupReady:false},
  recoverEncryption:async key=>{window.__recoveryCount=(window.__recoveryCount||0)+1;if(key==='bad')throw new Error('Ключ не подходит');return encryption={enabled:true,backupReady:true}},
  importEncryptionKeys:async()=>{encryption={enabled:true,backupReady:false};return 1},
@@ -60,7 +61,7 @@ export const api = {
  media:async source=>({data:mediaStore[source.url]||pixel}),
  upload:async upload=>{window.__uploads=[...(window.__uploads||[]),{...upload,data:undefined,bytes:atob(upload.data).length}];if(upload.target==='profile')return 'mxc://test/avatar';const id='$upload'+Date.now(),url='mxc://test/'+upload.txn;mediaStore[url]=upload.data;events.push({event_id:id,sender:session.userId,type:'m.room.message',origin_server_ts:Date.now(),content:{msgtype:upload.voice?'m.audio':upload.mime.startsWith('image/')?'m.image':'m.file',body:upload.name,url,info:{mimetype:upload.mime,size:20,duration:upload.durationMs},...(upload.voice?{'org.matrix.msc3245.voice':{}}:{})}});setTimeout(()=>publish(upload.roomId),5);return id;},
  cancelUpload:async()=>{},saveFile:async(name,data)=>{window.__savedFile={name,data};return true},
- desktop:async autostart=>({desktop:true,autostart:!!autostart}),minimize:async()=>{},notify:async()=>{},openUrl:async url=>{window.__openedUrl=url},
+ desktop:async autostart=>({desktop:true,autostart:!!autostart}),minimize:async()=>{},notify:async(title,body)=>{window.__notifications=[...(window.__notifications||[]),{title,body}]},openUrl:async url=>{window.__openedUrl=url},
  accounts:async()=>({entries:[],active:null}),addAccount:async()=>session,switchAccount:async()=>session,mediaPermissions:async()=>true,requestNotifications:async()=>true
 };
 export const onAppUpdateProgress=async()=>()=>{};

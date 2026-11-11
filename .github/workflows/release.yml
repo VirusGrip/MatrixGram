@@ -151,7 +151,11 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          printf 'MatrixGram %s\n\nWindows: signed in-app update. Android: confirm the system installer.\n' "$VERSION" > out/RELEASE-NOTES.txt
+          if test -f "release-notes/$VERSION.md"; then
+            cp "release-notes/$VERSION.md" out/RELEASE-NOTES.txt
+          else
+            printf 'MatrixGram %s\n\nWindows: signed in-app update. Android: confirm the system installer.\n' "$VERSION" > out/RELEASE-NOTES.txt
+          fi
           node scripts/release-manifest.mjs "$GITHUB_REPOSITORY" "$VERSION" out out/RELEASE-NOTES.txt
           git archive --format=zip --prefix="MatrixGram-$VERSION/" --output="out/MatrixGram-source-$VERSION.zip" HEAD
           (cd out && sha256sum *.exe *.apk *.zip > SHA256SUMS.txt)

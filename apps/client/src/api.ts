@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { SessionInfo, RoomSummary, MatrixEvent, TimelinePage, Update, EncryptionStatus, ChatFolder, UserSearchResult } from './models';
+import type { SessionInfo, RoomSummary, TimelinePage, Update, EncryptionStatus, ChatFolder, UserSearchResult } from './models';
 
 export const nativeAvailable = () => isTauri();
 export const api = {
@@ -13,7 +13,7 @@ export const api = {
   logout: () => invoke<void>('logout'),
   forget: () => invoke<void>('forget_session'),
   rooms: () => invoke<RoomSummary[]>('rooms'),
-  cached: (roomId: string) => invoke<MatrixEvent[]>('cached_timeline', { roomId }),
+  cached: (roomId: string) => invoke<TimelinePage>('cached_timeline', { roomId }),
   history: (roomId: string, from: string | null) => invoke<TimelinePage>('history', { roomId, from }),
   send: (roomId: string, body: string, txn: string, replyTo?: string) => invoke<string>('send_text', { roomId, body, txn, replyTo: replyTo ?? null }),
   edit: (roomId: string, eventId: string, body: string) => invoke<void>('edit_message', { roomId, eventId, body }),

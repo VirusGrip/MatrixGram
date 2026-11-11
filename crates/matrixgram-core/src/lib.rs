@@ -325,6 +325,24 @@ impl Account {
                 last_ts,
                 avatar_url,
                 direct_user_id: direct_user.map(|id| id.to_string()),
+                inviter: if room.state() == RoomState::Invited {
+                    room.invite_details()
+                        .await
+                        .ok()
+                        .map(|invite| SenderProfile {
+                            user_id: invite.inviter_id.to_string(),
+                            name: invite
+                                .inviter
+                                .as_ref()
+                                .map(|m| m.name().to_owned())
+                                .unwrap_or_else(|| invite.inviter_id.localpart().to_owned()),
+                            avatar_url: invite
+                                .inviter
+                                .and_then(|m| m.avatar_url().map(ToString::to_string)),
+                        })
+                } else {
+                    None
+                },
             });
         }
         result.sort_by(|a, b| b.last_ts.cmp(&a.last_ts).then_with(|| a.name.cmp(&b.name)));
@@ -388,12 +406,30 @@ impl Account {
             if !encrypted {
                 self.cache.save_events(id.as_str(), &events)?;
             }
-            if !events.is_empty() {
-                timelines.push(TimelinePage {
-                    room_id: id.to_string(),
-                    events,
-                    next: room.timeline.prev_batch,
-                });
+            // A state-only sync can rename a sender or change channel permissions.
+            let state_events = match &room.state {
+                matrix_sdk::sync::State::Before(events)
+                | matrix_sdk::sync::State::After(events) => events,
+            };
+            let changed_members = state_events
+                .iter()
+                .filter_map(|event| {
+                    let value: Value = serde_json::from_str(event.json().get()).ok()?;
+                    (value["type"] == "m.room.member")
+                        .then(|| value["state_key"].as_str().map(str::to_owned))
+                        .flatten()
+                })
+                .collect::<Vec<_>>();
+            if !events.is_empty() || !state_events.is_empty() {
+                timelines.push(
+                    self.timeline_page(
+                        id.as_str(),
+                        events,
+                        room.timeline.prev_batch,
+                        changed_members,
+                    )
+                    .await?,
+                );
             }
         }
         Ok(Update {
@@ -415,18 +451,45 @@ impl Account {
         if encrypted && !self.e2ee_enabled.load(Ordering::Acquire) {
             allow_plaintext("encrypted")?;
         }
-        if encrypted && self.client.encryption().backups().are_enabled().await {
-            let _ = self
-                .client
-                .encryption()
-                .backups()
-                .download_room_keys_for_room(room.room_id())
-                .await;
+        let options = || {
+            let mut options = MessagesOptions::backward();
+            options.from = from.clone();
+            options.limit = uint!(50);
+            options.filter.lazy_load_options =
+                matrix_sdk::ruma::api::client::filter::LazyLoadOptions::Enabled {
+                    include_redundant_members: true,
+                };
+            options
+        };
+        let mut response = room.messages(options()).await.map_err(network_error)?;
+        // Use local crypto keys first. Downloading the whole room backup before
+        // every history page made even fully decrypted chats wait for the network.
+        let missing_keys = response.chunk.iter().any(|event| {
+            event
+                .raw()
+                .get_field::<String>("type")
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some("m.room.encrypted")
+        });
+        if encrypted
+            && missing_keys
+            && self.client.encryption().backups().are_enabled().await
+            && matches!(
+                tokio::time::timeout(
+                    Duration::from_secs(10),
+                    self.client
+                        .encryption()
+                        .backups()
+                        .download_room_keys_for_room(room.room_id())
+                )
+                .await,
+                Ok(Ok(()))
+            )
+        {
+            response = room.messages(options()).await.map_err(network_error)?;
         }
-        let mut options = MessagesOptions::backward();
-        options.from = from;
-        options.limit = uint!(50);
-        let response = room.messages(options).await.map_err(network_error)?;
         let encrypted = encrypted
             || response.chunk.iter().any(|event| {
                 event.encryption_info().is_some()
@@ -450,11 +513,94 @@ impl Account {
         if !encrypted {
             self.cache.save_events(room_id, &events)?;
         }
+        let mut page = self
+            .timeline_page(room_id, events, response.end, Vec::new())
+            .await?;
+        // /messages returns membership state separately; this low-level SDK API
+        // does not store it. Use it for senders absent from the local state store.
+        let mut known = page
+            .profiles
+            .iter()
+            .map(|profile| profile.user_id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        for event in response.state {
+            let Ok(value) = serde_json::from_str::<Value>(event.json().get()) else {
+                continue;
+            };
+            if value["type"] != "m.room.member" {
+                continue;
+            }
+            let Some(user) = value["state_key"].as_str() else {
+                continue;
+            };
+            let Ok(id) = matrix_sdk::ruma::UserId::parse(user) else {
+                continue;
+            };
+            if known.insert(user.to_owned()) {
+                page.profiles.push(SenderProfile {
+                    user_id: user.into(),
+                    name: value["content"]["displayname"]
+                        .as_str()
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or(id.localpart())
+                        .into(),
+                    avatar_url: value["content"]["avatar_url"].as_str().map(str::to_owned),
+                });
+            }
+        }
+        Ok(page)
+    }
+
+    // Profiles and permissions come from the SDK's local state store. They cross
+    // IPC with the events, so the first rendered frame has the known display names.
+    async fn timeline_page(
+        &self,
+        room_id: &str,
+        events: Vec<Value>,
+        next: Option<String>,
+        additional_users: Vec<String>,
+    ) -> Result<TimelinePage> {
+        let room = self.room(room_id)?;
+        let users = events
+            .iter()
+            .filter_map(|event| {
+                if event["type"] == "m.room.member" {
+                    event["state_key"].as_str()
+                } else {
+                    event["sender"].as_str()
+                }
+            })
+            .map(str::to_owned)
+            .chain(additional_users)
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut profiles = Vec::new();
+        for user in users {
+            if let Ok(id) = matrix_sdk::ruma::UserId::parse(user)
+                && let Some(member) = room.get_member_no_sync(&id).await.map_err(network_error)?
+            {
+                profiles.push(SenderProfile {
+                    user_id: id.to_string(),
+                    name: member.name().to_owned(),
+                    avatar_url: member.avatar_url().map(ToString::to_string),
+                });
+            }
+        }
+        let power = room.power_levels_or_default().await;
         Ok(TimelinePage {
             room_id: room_id.into(),
             events,
-            next: response.end,
+            next,
+            profiles,
+            can_send: power.user_can_send_message(
+                room.own_user_id(),
+                matrix_sdk::ruma::events::MessageLikeEventType::RoomMessage,
+            ),
         })
+    }
+
+    pub async fn cached_page(&self, room_id: &str) -> Result<TimelinePage> {
+        self.timeline_page(room_id, self.cached_timeline(room_id)?, None, Vec::new())
+            .await
     }
 
     pub fn cached_timeline(&self, room_id: &str) -> Result<Vec<Value>> {

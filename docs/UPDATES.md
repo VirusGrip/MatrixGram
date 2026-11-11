@@ -19,15 +19,17 @@ Android скачивает подписанный APK, затем проверя
 После внесения и коммита изменений кода:
 
 ```powershell
-node scripts/set-version.mjs 0.5.3
+node scripts/set-version.mjs 0.5.4
 npm test
 git add package.json package-lock.json Cargo.toml Cargo.lock apps/client/package.json apps/client/src-tauri/tauri.conf.json apps/client/src/App.tsx
-git commit -m "Release 0.5.3"
-git tag v0.5.3
-git push --atomic origin main v0.5.3
+git commit -m "Release 0.5.4"
+git tag v0.5.4
+git push --atomic origin main v0.5.4
 ```
 
 `set-version` обновляет npm/Cargo/Tauri manifests, собственные записи lockfiles и номер в UI. Неизвестные версии, понижение и рассогласованные исходные версии отклоняются. Номер не нужно менять в нескольких файлах вручную.
+
+Описание изменений можно записать в `release-notes/VERSION.md` и включить в тот же commit. Release workflow использует его для страницы релиза и поля notes в `latest.json`; этот текст будет виден в настройках перед обновлением.
 
 `.github/workflows/release.yml` собирает Windows x64 и Android arm64, использует постоянные ключи, создаёт `.sig` и `latest.json`, добавляет source ZIP и SHA-256. Релиз сначала создаётся как draft; после наличия обоих пакетов публикуется и становится latest. Повторное использование уже опубликованного номера не заменяет его файлы автоматически: исправление выпускается новым номером. Ручной повтор доступен через Actions → Signed MatrixGram release → Run workflow с существующим тегом.
 

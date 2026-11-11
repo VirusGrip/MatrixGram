@@ -1,6 +1,69 @@
 import { test, expect } from '@playwright/test';
 import { fixtureApi, login } from './fixtures';
 
+test('known names render with cached messages before slow history and remain immediate on chat switches', async ({page})=>{
+  const adapter=fixtureApi.replace("name:'Bob'","name:'Борис Иванов'")+`
+  const originalHistory=api.history;
+  api.history=async id=>{window.__historyCalls=(window.__historyCalls||0)+1;await new Promise(resolve=>{window.__releaseHistory=resolve});return originalHistory(id)};
+  `;
+  await login(page,adapter);
+  await page.evaluate(()=>{
+    (window as any).__senderFrames=[];
+    new MutationObserver(()=>{for(const element of document.querySelectorAll('.message-list .sender'))(window as any).__senderFrames.push(element.textContent)}).observe(document.body,{subtree:true,childList:true,characterData:true});
+  });
+  await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+  await expect(page.locator('.message-list .sender')).toHaveText('Борис Иванов');
+  await expect(page.locator('.message-list .message-text')).toContainText('Привет, команда!');
+  await expect.poll(()=>page.evaluate(()=>typeof (window as any).__releaseHistory)).toBe('function');
+  await page.evaluate(()=>(window as any).__releaseHistory());
+  await expect(page.getByRole('button',{name:'Начало доступной истории'})).toBeVisible();
+  for(let i=0;i<6;i++){
+    await page.getByRole('button',{name:'Открыть Закрытая комната'}).click();
+    await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
+    await expect(page.locator('.message-list .sender')).toHaveText('Борис Иванов');
+  }
+  const result=await page.evaluate(()=>({calls:(window as any).__historyCalls,names:(window as any).__senderFrames,operations:(window as any).__operations||[]}));
+  expect(result.calls).toBe(1);expect(result.names.length).toBeGreaterThan(0);
+  expect(result.names.every((name:string)=>name==='Борис Иванов')).toBe(true);
+  expect(result.operations.filter((operation:any)=>operation.kind==='roomDetails')).toHaveLength(0);
+});
+
+const invitationAdapter=fixtureApi+`
+const invitation={id:'!invite:test',name:'Новая рабочая группа',membership:'invited',encryption:'unencrypted',unread:0,members:2,lastBody:null,lastTs:0,inviter:{userId:'@bob:test',name:'Борис Иванов'}};
+window.__invite=()=>{const existing=rooms.find(room=>room.id===invitation.id);if(existing)existing.membership='invited';else rooms.push({...invitation});window.__emitInvites()};
+window.__emitInvites=()=>updates.forEach(callback=>callback(session.userId+'|'+session.deviceId,{rooms:rooms.map(room=>({...room})),timelines:[],connection:'online',error:null}));
+`;
+
+test('a message-free invitation notifies once, remains visible outside filters, and can be accepted',async({page})=>{
+  await login(page,invitationAdapter);
+  await page.getByRole('button',{name:'Закреплённые чаты',exact:true}).first().click();
+  await page.evaluate(()=>(window as any).__invite());
+  await expect(page.getByRole('button',{name:'Приглашения: 1',exact:true})).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>(window as any).__notifications?.length)).toBe(1);
+  await page.evaluate(()=>{for(let i=0;i<10;i++)(window as any).__emitInvites()});
+  await page.getByRole('button',{name:'Приглашения: 1',exact:true}).click();
+  await page.getByRole('button',{name:'Открыть Новая рабочая группа'}).click();
+  await expect(page.getByRole('heading',{name:'Приглашение в комнату',exact:true})).toBeVisible();
+  await expect(page.getByText('Борис Иванов приглашает вас')).toBeVisible();
+  expect(await page.evaluate(()=>(window as any).__notifications)).toEqual([{title:'Приглашение в комнату',body:'Борис Иванов приглашает в «Новая рабочая группа»'}]);
+  await page.screenshot({path:'test-results/invitation.png'});
+  await page.getByRole('button',{name:'Вступить',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Сообщение',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Приглашения: 1',exact:true})).toHaveCount(0);
+});
+
+test('an invitation present at login is notified once and decline does not join or fetch its history',async({page})=>{
+  await login(page,invitationAdapter+`rooms.push({...invitation});`);
+  await page.getByRole('button',{name:'Приглашения: 1',exact:true}).click();
+  await page.getByRole('button',{name:'Открыть Новая рабочая группа'}).click();
+  await page.getByRole('button',{name:'Отклонить приглашение',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Приглашения: 1',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Открыть Новая рабочая группа'})).toHaveCount(0);
+  const result=await page.evaluate(()=>({notifications:(window as any).__notifications,operations:(window as any).__operations}));
+  expect(result.notifications).toHaveLength(1);
+  expect(result.operations).toContainEqual({kind:'leave',roomId:'!invite:test'});
+});
+
 test('web-only shell clearly explains why login is unavailable', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByText('Открыта веб-оболочка.', { exact: false })).toBeVisible();
@@ -333,7 +396,7 @@ test('server history search opens a message outside loaded history', async ({ pa
 });
 
 test('read-only channel hides the composer and explains permissions', async ({ page }) => {
-  await login(page,fixtureApi.replace('canSend:true','canSend:false'));
+  await login(page,fixtureApi.replaceAll('canSend:true','canSend:false'));
   await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
   await expect(page.locator('.channel-readonly')).toBeVisible();
   await expect(page.getByRole('textbox',{name:'Сообщение',exact:true})).toHaveCount(0);

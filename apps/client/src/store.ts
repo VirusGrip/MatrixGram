@@ -2,11 +2,12 @@ import { create } from 'zustand';
 import { api } from './api';
 import { mergeEvents } from './timeline';
 import { contactKey, readContactNames, type ContactNames } from './contacts';
-import type { MatrixEvent, RoomSummary, SessionInfo, Update, PendingMessage, EncryptionStatus, ChatFolder } from './models';
+import type { MatrixEvent, RoomSummary, SessionInfo, Update, PendingMessage, EncryptionStatus, ChatFolder, SenderProfile, TimelinePage } from './models';
 
 interface Store {
   session: SessionInfo | null; rooms: RoomSummary[]; activeRoom: string | null;
   events: Record<string, MatrixEvent[]>; cursors: Record<string, string | null>;
+  profiles: Record<string, Record<string, SenderProfile>>; canSend: Record<string, boolean>;
   pending: PendingMessage[]; connection: string; error: string | null;
   encryption: EncryptionStatus; folders: ChatFolder[];
   typing: Record<string, { users: string[]; expires: number }>;
@@ -22,8 +23,19 @@ interface Store {
   send: (roomId: string, body: string, replyTo?: string, txn?: string) => Promise<boolean>;
   clear: () => void;
 }
-const empty = { session: null, rooms: [], activeRoom: null, events: {}, cursors: {}, pending: [], connection: 'connecting', error: null, encryption: { enabled: false, backupReady: false }, folders: [], typing: {}, receipts: {} };
-const historyRequests = new WeakMap<SessionInfo, Map<string, Promise<void>>>();
+const empty = { session: null, rooms: [], activeRoom: null, events: {}, cursors: {}, profiles: {}, canSend: {}, pending: [], connection: 'connecting', error: null, encryption: { enabled: false, backupReady: false }, folders: [], typing: {}, receipts: {} };
+const historyRequests = new WeakMap<SessionInfo, Map<string, { promise: Promise<void>; encryption: EncryptionStatus }>>();
+const loadedPages = new WeakMap<SessionInfo, Map<string, { at: number; encryption: EncryptionStatus }>>();
+function pageState(state: Store, pages: TimelinePage[]) {
+  const events = { ...state.events }, profiles = { ...state.profiles }, canSend = { ...state.canSend };
+  for (const page of pages) {
+    if (page.events.length) events[page.roomId] = mergeEvents(events[page.roomId] ?? [], page.events);
+    else events[page.roomId] ??= [];
+    if (page.profiles?.length) profiles[page.roomId] = { ...profiles[page.roomId], ...Object.fromEntries(page.profiles.map(profile => [profile.userId, profile])) };
+    if (page.canSend !== undefined) canSend[page.roomId] = page.canSend;
+  }
+  return { events, profiles, canSend };
+}
 export const useStore = create<Store>((set, get) => ({
   ...empty, contactNames: {},
   setSession: session => set({ session, contactNames: session ? readContactNames(session) : {} }),
@@ -43,8 +55,7 @@ export const useStore = create<Store>((set, get) => ({
   apply: (key, update) => {
     const state = get();
     if (!state.session || `${state.session.userId}|${state.session.deviceId}` !== key) return;
-    const events = { ...state.events };
-    for (const page of update.timelines) events[page.roomId] = mergeEvents(events[page.roomId] ?? [], page.events);
+    const pages = pageState(state, update.timelines);
     const receivedIds = new Set(update.timelines.flatMap(p => p.events.map(e => e.event_id)));
     const receivedTxn = new Set(update.timelines.flatMap(p => p.events.map(e => e.unsigned?.transaction_id)));
     const typing = { ...state.typing }, receipts = { ...state.receipts };
@@ -63,7 +74,7 @@ export const useStore = create<Store>((set, get) => ({
       }
     }
     const pending = state.pending.filter(p => !receivedTxn.has(p.txn) && !(p.eventId && receivedIds.has(p.eventId)));
-    set({ rooms: update.rooms, events, connection: update.connection, error: update.error,
+    set({ rooms: update.rooms, ...pages, connection: update.connection, error: update.error,
       typing, receipts,
       pending: pending.length === state.pending.length ? state.pending : pending });
   },
@@ -71,22 +82,33 @@ export const useStore = create<Store>((set, get) => ({
   load: (id, older = false) => {
     const session = get().session;
     if (!session) return Promise.resolve();
+    const encryption = get().encryption;
+    let loaded = loadedPages.get(session);
+    if (!loaded) { loaded = new Map(); loadedPages.set(session, loaded); }
+    const last = loaded.get(id);
+    // Reopening an already hydrated room renders memory immediately. Sync keeps
+    // it current; a later visit still refreshes the server page in the background.
+    if (!older && last?.encryption === encryption && Date.now() - last.at < 60_000) return Promise.resolve();
     let requests = historyRequests.get(session);
     if (!requests) { requests = new Map(); historyRequests.set(session, requests); }
     const key = JSON.stringify([id, older, older ? get().cursors[id] ?? null : null]);
-    const existing = requests.get(key); if (existing) return existing;
+    const existing = requests.get(key); if (existing?.encryption === encryption) return existing.promise;
     const request = (async () => {
-      if (!older) {
+      if (!older && !get().events[id]) {
         const cached = await api.cached(id);
-        if (get().session !== session) return;
-        set(s => ({ events: { ...s.events, [id]: mergeEvents(s.events[id] ?? [], cached) } }));
+        if (get().session !== session || get().encryption !== encryption) return;
+        set(s => pageState(s, [cached]));
       }
       const page = await api.history(id, older ? get().cursors[id] ?? null : null);
-      if (get().session !== session) return;
-      set(s => ({ events: { ...s.events, [id]: mergeEvents(s.events[id] ?? [], page.events) }, cursors: { ...s.cursors, [id]: page.next } }));
+      if (get().session !== session || get().encryption !== encryption) return;
+      set(s => ({ ...pageState(s, [page]), cursors: { ...s.cursors, [id]: page.next } }));
+      if (!older) {
+        if (page.events.some(event => event.type === 'm.room.encrypted')) loaded.delete(id);
+        else loaded.set(id, { at: Date.now(), encryption });
+      }
     })();
-    requests.set(key, request);
-    const complete = () => { requests.delete(key); };
+    requests.set(key, { promise: request, encryption });
+    const complete = () => { if (requests.get(key)?.promise === request) requests.delete(key); };
     void request.then(complete, complete);
     return request;
   },

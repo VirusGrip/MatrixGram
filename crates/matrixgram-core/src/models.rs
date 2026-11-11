@@ -28,6 +28,16 @@ pub struct RoomSummary {
     pub avatar_url: Option<String>,
     #[serde(default)]
     pub direct_user_id: Option<String>,
+    #[serde(default)]
+    pub inviter: Option<SenderProfile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SenderProfile {
+    pub user_id: String,
+    pub name: String,
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -36,6 +46,8 @@ pub struct TimelinePage {
     pub room_id: String,
     pub events: Vec<Value>,
     pub next: Option<String>,
+    pub profiles: Vec<SenderProfile>,
+    pub can_send: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

@@ -155,6 +155,89 @@ fn sync_response(encrypted: bool) -> Value {
     })
 }
 
+#[tokio::test]
+async fn cached_page_includes_known_sender_and_permissions_without_network_requests() {
+    let f = fixture(false).await;
+    let before = f.server.received_requests().await.unwrap().len();
+    let page = f.account.cached_page("!test:example.org").await.unwrap();
+    assert_eq!(page.events[0]["sender"], "@alice:example.org");
+    assert_eq!(page.profiles[0].user_id, "@alice:example.org");
+    assert_eq!(page.profiles[0].name, "Alice");
+    assert!(page.can_send);
+    let requests = f.server.received_requests().await.unwrap();
+    assert!(!requests[before..].iter().any(|request| {
+        request.url.path().contains("/rooms/") || request.url.path().contains("/profile/")
+    }));
+}
+
+#[tokio::test]
+async fn state_only_sync_updates_sender_name_and_permissions_without_a_new_message() {
+    let f = fixture(false).await;
+    let mut response = sync_response(false);
+    response["next_batch"] = json!("profile-change");
+    response["rooms"]["join"]["!test:example.org"]["timeline"]["events"] = json!([]);
+    response["rooms"]["join"]["!test:example.org"]["state"]["events"] = json!([
+        {"type":"m.room.member","state_key":"@alice:example.org","sender":"@alice:example.org","event_id":"$renamed","origin_server_ts":20,"content":{"membership":"join","displayname":"Алиса Новая","avatar_url":"mxc://example.org/new"}},
+        {"type":"m.room.power_levels","state_key":"","sender":"@alice:example.org","event_id":"$powers","origin_server_ts":21,"content":{"users":{"@alice:example.org":0},"events":{"m.room.message":50}}}
+    ]);
+    Mock::given(method("GET"))
+        .and(path("/_matrix/client/v3/sync"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response))
+        .with_priority(1)
+        .mount(&f.server)
+        .await;
+    let update = f.account.sync_once().await.unwrap();
+    assert_eq!(update.timelines.len(), 1);
+    let page = &update.timelines[0];
+    assert!(page.events.is_empty());
+    assert_eq!(page.profiles[0].name, "Алиса Новая");
+    assert_eq!(
+        page.profiles[0].avatar_url.as_deref(),
+        Some("mxc://example.org/new")
+    );
+    assert!(!page.can_send);
+    assert_eq!(
+        f.account
+            .cached_page("!test:example.org")
+            .await
+            .unwrap()
+            .profiles[0]
+            .name,
+        "Алиса Новая"
+    );
+}
+
+#[tokio::test]
+async fn stripped_invitation_without_messages_is_visible_with_inviter_profile() {
+    let f = fixture(false).await;
+    let response = json!({"next_batch":"invited", "rooms":{"invite":{"!invite:example.org":{"invite_state":{"events":[
+        {"type":"m.room.create","state_key":"","sender":"@bob:example.org","content":{"creator":"@bob:example.org","room_version":"10"}},
+        {"type":"m.room.name","state_key":"","sender":"@bob:example.org","content":{"name":"Новая комната"}},
+        {"type":"m.room.member","state_key":"@bob:example.org","sender":"@bob:example.org","content":{"membership":"join","displayname":"Борис","avatar_url":"mxc://example.org/bob"}},
+        {"type":"m.room.member","state_key":"@alice:example.org","sender":"@bob:example.org","content":{"membership":"invite","displayname":"Alice"}}
+    ]}}}}});
+    Mock::given(method("GET"))
+        .and(path("/_matrix/client/v3/sync"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response))
+        .with_priority(1)
+        .mount(&f.server)
+        .await;
+    let update = f.account.sync_once().await.unwrap();
+    assert!(update.timelines.is_empty());
+    let room = update
+        .rooms
+        .iter()
+        .find(|room| room.id == "!invite:example.org")
+        .unwrap();
+    assert_eq!(room.membership, "invited");
+    assert_eq!(room.unread, 0);
+    assert_eq!(room.name, "Новая комната");
+    let inviter = room.inviter.as_ref().unwrap();
+    assert_eq!(inviter.user_id, "@bob:example.org");
+    assert_eq!(inviter.name, "Борис");
+    assert_eq!(inviter.avatar_url.as_deref(), Some("mxc://example.org/bob"));
+}
+
 async fn fixture(encrypted: bool) -> Fixture {
     install_tls();
     let server = MockServer::start().await;
@@ -366,7 +449,7 @@ async fn pagination_passes_cursor_and_caches_response_without_duplicate_events()
     let f = fixture(false).await;
     unencrypted_state(&f.server).await;
     Mock::given(method("GET")).and(path_regex(r"/_matrix/client/v3/rooms/.*/messages$"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"start":"older","end":"oldest","chunk":[{"type":"m.room.message","event_id":"$old","sender":"@bob:example.org","origin_server_ts":5,"content":{"msgtype":"m.text","body":"earlier"}}],"state":[]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"start":"older","end":"oldest","chunk":[{"type":"m.room.message","event_id":"$old","sender":"@bob:example.org","origin_server_ts":5,"content":{"msgtype":"m.text","body":"earlier"}}],"state":[{"type":"m.room.member","state_key":"@bob:example.org","room_id":"!test:example.org","sender":"@bob:example.org","event_id":"$historical-profile","origin_server_ts":4,"content":{"membership":"leave","displayname":"Борис Исторический"}}]})))
         .mount(&f.server).await;
     let page = f
         .account
@@ -375,6 +458,7 @@ async fn pagination_passes_cursor_and_caches_response_without_duplicate_events()
         .unwrap();
     assert_eq!(page.next.as_deref(), Some("oldest"));
     assert_eq!(page.events[0]["content"]["body"], "earlier");
+    assert_eq!(page.profiles[0].name, "Борис Исторический");
     assert_eq!(
         f.account.cache.events("!test:example.org").unwrap().len(),
         2
@@ -390,6 +474,16 @@ async fn pagination_passes_cursor_and_caches_response_without_duplicate_events()
             .query_pairs()
             .any(|(k, v)| k == "from" && v == "older")
     );
+    let filter = history
+        .url
+        .query_pairs()
+        .find(|(key, _)| key == "filter")
+        .unwrap()
+        .1
+        .into_owned();
+    let filter: Value = serde_json::from_str(&filter).unwrap();
+    assert_eq!(filter["lazy_load_members"], true);
+    assert_eq!(filter["include_redundant_members"], true);
 }
 
 #[tokio::test]
