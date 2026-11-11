@@ -41,7 +41,7 @@ Remove-Item Env:MATRIXGRAM_LOAD_BURSTS
 Remove-Item Env:MATRIXGRAM_PERF_LABEL
 ```
 
-Количество обновлений ограничено диапазоном 1–1 000, по умолчанию 40. JSON пишется в `apps/client/performance-results/browser-<label>.json`, default label `current`. SQLite печатает `LOAD_CACHE_JSON`. Нагрузочный сценарий исключён из обычного `test:e2e`; Windows CI содержит отдельные шаги, сам workflow здесь не запускался.
+Количество обновлений ограничено диапазоном 1–1 000, по умолчанию 40. JSON пишется в `apps/client/performance-results/browser-<label>.json`, default label `current`. SQLite печатает `LOAD_CACHE_JSON`. Нагрузочный сценарий исключён из обычного `test:e2e`; Windows CI содержит отдельные шаги. При подготовке 0.5.1 workflow не запускался; в 0.5.2 эти проверки [успешно прошли на GitHub](https://github.com/VirusGrip/MatrixGram/actions/runs/43053375856). Результаты сравнения в таблице выше относятся к локальному стенду 0.5.1.
 
 Проверки блокируют ошибки JS, потерю доступности истории, разворачивание всех строк в DOM, p95 обновления/поиск более 5 секунд и retained heap growth более 80 МиБ. Это широкие пороги регрессий для разных машин, не целевая задержка продукта.
 

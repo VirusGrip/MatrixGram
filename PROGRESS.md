@@ -14,13 +14,25 @@
 
 - **39 Rust tests**: 34 core и 5 приложения, включая настоящий minisign/tamper/подмену версии, stable-version/URL policy и прежние E2EE/SQLite/DPAPI/Matrix SDK сценарии. Отдельный SQLite load-тест сохранён как ignored по умолчанию.
 - **27 frontend unit tests**, **40 Playwright-сценариев** с отдельным IPC. Новые сценарии: update check/download/install, ошибка подписи, сохранение черновика и отказ при ошибке, Android permission/retry и актуальная версия.
-- **2 Node release-tool tests**: manifest обеих платформ с подписанной версией и bump версии без рассогласования. Три workflow разобраны YAML parser. Фактический CI-запуск будет указан ниже после завершения.
+- **2 Node release-tool tests**: manifest обеих платформ с подписанной версией и bump версии без рассогласования. Три workflow разобраны YAML parser. Фактические CI-запуски указаны ниже.
 - Production frontend build, policy check, Rust fmt и Clippy. Для test tooling Vitest обновлён до 4.1.12; npm audit при обновлении сообщил 0 известных уязвимостей.
 - Подписание локальным зашифрованным ключом прошло preflight на существующем 0.5.1 installer; ошибочные подписи не включают установку в UI/native tests.
 
 ## Статус выпуска
 
-Локальные Windows EXE/NSIS с updater signature и Android debug APK 0.5.2 собраны. В исходниках настроены постоянные ключи для release CI. Первый запуск GitHub release workflow и публикация артефактов выполняются; актуальный итог фиксируется в этой секции после завершения. Официальные пакеты будут доступны в [Releases](https://github.com/VirusGrip/MatrixGram/releases).
+**0.5.2 опубликована 11 ноября 2026 в 16:54 UTC:** [релиз и исходники](https://github.com/VirusGrip/MatrixGram/releases/tag/v0.5.2).
+
+- [Windows x64 installer](https://github.com/VirusGrip/MatrixGram/releases/download/v0.5.2/MatrixGram_0.5.2_x64-setup.exe) — 15 399 517 байт.
+- [Android arm64 release APK](https://github.com/VirusGrip/MatrixGram/releases/download/v0.5.2/MatrixGram-0.5.2-android-arm64.apk) — 52 902 220 байт; Android 8+, versionCode 5002, target SDK 36.
+- [Source ZIP](https://github.com/VirusGrip/MatrixGram/releases/download/v0.5.2/MatrixGram-source-0.5.2.zip) — 493 995 байт; [SHA-256](https://github.com/VirusGrip/MatrixGram/releases/download/v0.5.2/SHA256SUMS.txt).
+
+[Подписанный release workflow](https://github.com/VirusGrip/MatrixGram/actions/runs/43059181981) успешно выполнил Windows, Android и publish jobs. [Основной Windows workflow](https://github.com/VirusGrip/MatrixGram/actions/runs/43053375856) прошёл функциональные проверки, fmt, Clippy, policy и отдельные нагрузочные сценарии браузера/SQLite. В browser IPC-нагрузке: 5 000 комнат, 60 000 событий, CPU ×4; sync median 167,3 мс / p95 184,3 мс, поиск 145,1 мс. Это отдельный облачный стенд, не замер native клиента или телефона и не сравнение со стендом 0.5.1.
+
+Скачанные из опубликованного релиза файлы независимо проверены: SHA-256, minisign обоих пакетов и подписанная версия; APK v2 и исходный сертификат 0.5.1, package ID/versionCode, arm64 ELF/JNI/TLS/update provider; CRC и конфигурация source ZIP. Публичный `releases/latest/download/latest.json` без авторизации вернул HTTP 200, версию 0.5.2 и обе платформы. Windows-подпись updater не является Authenticode-сертификатом.
+
+Исходники пакетов: tag `v0.5.2`, commit `2cf14903a263d8cc9f52a7e5aa7bbd10c3dcccfa`. Первый выпуск запущен вручную с этим тегом и workflow из `382d38fca50fc3cf60bd5760ef2373e553beee6b`: в main исправлены подготовка Android SDK и абсолютный путь к APK для signer. Тег не перемещался. Source ZIP отражает снимок тега; этот итог выпуска записан в main отдельно.
+
+Локальные копии официальных пакетов, `.sig`, manifest, контрольных сумм и `BUILD-0.5.2.json` сохранены в `releases/`; source ZIP — рядом с проектом. Старые версии сохранены. Первую установку 0.5.2 выполняют вручную, затем новые версии проверяются через Настройки → Обновления MatrixGram. Переход между установленными версиями на Windows и Android ещё не проверен.
 
 ## Сохранённые функции и ограничения
 

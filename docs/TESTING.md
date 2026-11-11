@@ -20,7 +20,7 @@
 6. Создать обычную группу и канал, пригласить второго тестового участника, проверить права/запрет отправки, роль/ban/leave. Проверить rooms directory и matrix.to link.
 7. Добавить второй аккаунт, переключить несколько раз, перезапустить, выйти только из выбранного профиля. Отозвать отдельное тестовое устройство с UIA-паролем.
 8. Два клиента: audio/video/permissions/mute/hangup; затем relay-only TURN, NAT и потеря сети. Проверить поддержку именно room VoIP v1 у второго клиента.
-9. Android arm64: startup/TLS/login, restore через Keystore, Back/keyboard/rotation/share/save, permission denial, background limitations. Debug APK не считается проверенным телефоном.
+9. Android arm64: startup/TLS/login, restore через Keystore, Back/keyboard/rotation/share/save, permission denial, background limitations. Собранный APK не считается проверенным телефоном.
 
 Учётные данные пользователя, действующий TURN и реальные переписки в автоматических проверках не использовались. Нет подтверждения чистой установки, физического Android, реального E2EE recovery пользователя, real TURN/Element или системных уведомлений. Не подменять эти пункты результатом mock-тестов.
 
@@ -31,7 +31,7 @@ npm run test:load
 cargo test --workspace --locked cache_load_100000_events -- --ignored --nocapture
 ```
 
-Нагрузочные тесты отделены от обычного Playwright-набора. Используется локальный IPC, не Synapse. JSON отчёт браузера: `apps/client/performance-results/browser-current.json`; native метрики печатаются как `LOAD_CACHE_JSON`. Профиль, пороги, параметры длительного прогона и пределы интерпретации — [PERFORMANCE.md](PERFORMANCE.md). Windows workflow содержит эти шаги, но на GitHub в этой разработке не запускался.
+Нагрузочные тесты отделены от обычного Playwright-набора. Используется локальный IPC, не Synapse. JSON отчёт браузера: `apps/client/performance-results/browser-current.json`; native метрики печатаются как `LOAD_CACHE_JSON`. Профиль, пороги, параметры длительного прогона и пределы интерпретации — [PERFORMANCE.md](PERFORMANCE.md). В 0.5.2 Windows workflow успешно выполнил функциональные и нагрузочные проверки: [GitHub Actions](https://github.com/VirusGrip/MatrixGram/actions/runs/43053375856). Это не замер физического Android или native WebView2.
 
 
 ## Updater

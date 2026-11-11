@@ -26,9 +26,9 @@ prepare-android добавляет permissions, share intent filters, min/target
 
 До релиза обязательны: запуск на arm64-устройстве, HTTPS login/sync/send, restart/session restore/Keystore, поворот/клавиатура/safe areas, Back/share/save, разрешения с отказом, WebRTC/audio/video и уход в фон. FCM/UnifiedPush и call foreground service не реализованы: в закрытом/усыплённом приложении доставка уведомлений/звонков не гарантируется.
 
-Debug APK использует тестовую подпись и предназначен для проверки. Для распространяемого release нужен отдельный signing keystore вне Git. Не заменяйте чужую/production подпись автоматически.
+Debug APK использует тестовую подпись и предназначен для проверки. Signing keystore хранится вне Git. В release CI 0.5.2 сохранён сертификат прежних тестовых установок; переход на production-подпись требует отдельного плана миграции. Не заменяйте существующую подпись автоматически.
 
-Подготовлен ручной workflow `.github/workflows/android.yml` на Ubuntu 24.04, JDK 21 и закреплённом NDK. Наличие SDK проверено по [образу GitHub runner](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md). Сам workflow на GitHub не запускался: репозиторий не опубликован. Windows workflow запускает тесты всего workspace.
+Для preview доступен ручной workflow `.github/workflows/android.yml` на Ubuntu 24.04, JDK 21 и закреплённом NDK; отдельно он пока не запускался. Подписанные пакеты выпускает `.github/workflows/release.yml`, который устанавливает закреплённые Android command-line tools, SDK и NDK. Фактический результат первого выпуска указан в [PROGRESS.md](../PROGRESS.md). Windows workflow запускает тесты всего workspace.
 
 
 Обновления APK реализованы через собственный JNI bridge и системный установщик: `REQUEST_INSTALL_PACKAGES`, ограниченный FileProvider private cache, проверка подписи, package ID и versionCode. Updater Tauri предназначен для desktop, поэтому его установка на Android не вызывается. [Канал обновлений](UPDATES.md).
