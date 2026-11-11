@@ -33,7 +33,7 @@ npm run test:load
 cargo test --workspace --locked cache_load_100000_events -- --ignored --nocapture
 ```
 
-Нагрузочные тесты отделены от обычного Playwright-набора. Используется локальный IPC, не Synapse. JSON отчёт браузера: `apps/client/performance-results/browser-current.json`; native метрики печатаются как `LOAD_CACHE_JSON`. Профиль, пороги, параметры длительного прогона и пределы интерпретации — [PERFORMANCE.md](PERFORMANCE.md). В 0.5.2 Windows workflow успешно выполнил функциональные и нагрузочные проверки: [GitHub Actions](https://github.com/VirusGrip/MatrixGram/actions/runs/43053375856). Это не замер физического Android или native WebView2.
+Нагрузочные тесты отделены от обычного Playwright-набора. Используется локальный IPC, не Synapse. JSON отчёт браузера: `apps/client/performance-results/browser-current.json`; native метрики печатаются как `LOAD_CACHE_JSON`. Профиль, пороги, параметры длительного прогона и пределы интерпретации — [PERFORMANCE.md](PERFORMANCE.md). В 0.5.3 Windows workflow успешно выполнил 42 Rust-, 37 frontend-, 43 браузерных теста, отдельную нагрузку и Clippy: [GitHub Actions](https://github.com/VirusGrip/MatrixGram/actions/runs/43099449604). [Облачный отчёт 0.5.3](performance-0.5.3-ci.json) относится к browser IPC; это не замер физического Android или native WebView2.
 
 
 ## Updater

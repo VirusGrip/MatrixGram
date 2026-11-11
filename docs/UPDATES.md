@@ -35,6 +35,8 @@ git push --atomic origin main v0.5.4
 
 Обычный Windows workflow выполняет функциональные и нагрузочные проверки. Сборка unsigned preview доступна через ручной workflow_dispatch; основной подписанный установщик собирается release workflow, чтобы не выполнять лишнюю релизную линковку на каждом commit.
 
+Если прежний запуск застрял до создания jobs и GitHub не отменяет его даже через API, ручной `recovery=true` использует отдельную concurrency group. Обычные запуски сохраняют группу по тегу. Например: `gh workflow run release.yml --ref main -f tag=v0.5.3 -f recovery=true`. Существующий опубликованный релиз по-прежнему не перезаписывается. `.github/workflows/actions-diagnostic.yml` вручную проверяет старт Linux/Windows без checkout, исходников, сторонних actions и Secrets. Эти обходы не устраняют сбой инфраструктуры GitHub.
+
 ## Ключи и однократная настройка
 
 Публичный updater key находится в `src-tauri/updates.json` и `tauri.conf.json`. Windows использует Tauri updater 2.14.1 с `requireSignedVersion=true`; Android проверяет тот же формат minisign, включая подписанную версию. Проверяются только новые stable SemVer. URL пакета ограничен выбранным репозиторием и тегом. Запросы выполняются в Rust по HTTPS; токены GitHub в клиент не встроены.
@@ -57,5 +59,7 @@ Android APK ограничен 256 МиБ, JSON manifest — 512 КиБ. APK з�
 Rust-тесты проверяют настоящий minisign: корректную подпись, повреждение payload, неверную подпись, замену подписанной версии, запрет понижения/prerelease и адресов чужого репозитория. Browser IPC-тесты проверяют проверку/скачивание/установку, отказ после ошибки подписи и сохранения черновика, актуальную версию и повтор после запроса разрешения Android. Node-тесты проверяют manifest обоих пакетов и согласованность bump версии. Это не заменяет реальный переход 0.5.2 → 0.5.3 на Windows и Android.
 
 Первый выпуск [0.5.2](https://github.com/VirusGrip/MatrixGram/releases/tag/v0.5.2) опубликован; [release workflow](https://github.com/VirusGrip/MatrixGram/actions/runs/43059181981) завершился успешно. Подписи скачанных пакетов и публичный адрес manifest проверены. Подробности и ограничения проверки на устройствах зафиксированы в [PROGRESS.md](../PROGRESS.md).
+
+[0.5.3](https://github.com/VirusGrip/MatrixGram/releases/tag/v0.5.3) опубликована 12 ноября 2026 в 00:15 МСК после восстановления GitHub Actions. [Восстановительный выпуск](https://github.com/VirusGrip/MatrixGram/actions/runs/43099450306) и [полные проверки](https://github.com/VirusGrip/MatrixGram/actions/runs/43099449604) прошли. Подписи опубликованных Windows/APK, сертификат Android, содержимое source ZIP и HTTP 200 для публичного `latest.json` 0.5.3 проверены независимо. Реальная установка 0.5.2 → 0.5.3 на пользовательском устройстве пока не проверена.
 
 Официальные источники: [Tauri updater](https://v2.tauri.app/plugin/updater/), [Android PackageManager](https://developer.android.com/reference/android/content/pm/PackageManager#canRequestPackageInstalls()).

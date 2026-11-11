@@ -1,0 +1,21 @@
+{
+  "rooms": 5000,
+  "seedEvents": 60000,
+  "burstCount": 40,
+  "cpuThrottle": 4,
+  "startupMs": 3448.0999999999767,
+  "searchMs": 98,
+  "syncMedianMs": 117,
+  "syncP95Ms": 133.59999999997672,
+  "syncMaxMs": 133.79999999998836,
+  "heapBeforeBytes": 29430280,
+  "heapAfterBytes": 30127224,
+  "longTaskCount": 59,
+  "longTaskMaxMs": 841,
+  "browser": "chromium",
+  "fixture": "local IPC; Vite development build; not Synapse or native WebView2",
+  "workflow": "https://github.com/VirusGrip/MatrixGram/actions/runs/43099449604",
+  "workflowCommit": "fd30885504aa46d9247c4e26133fec207d609454",
+  "appSourceCommit": "1a291ef1ed0178bd45d1faba12649b050689a2eb",
+  "scope": "Separate cloud runner; not a controlled before/after comparison, real Synapse or native application measurement."
+}
