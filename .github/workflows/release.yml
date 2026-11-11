@@ -30,6 +30,9 @@ jobs:
         with:
           toolchain: 1.99.1
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: signed-release-windows
+          cache-on-failure: true
       - run: npm ci
       - run: node scripts/check-release-version.mjs
       - run: cargo test --workspace --locked
@@ -79,7 +82,8 @@ jobs:
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
         with:
-          key: android-release
+          key: signed-release-android-arm64
+          cache-on-failure: true
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
           cmdline-tools-version: '15859902'
@@ -118,7 +122,7 @@ jobs:
           test -n "$APK"
           cp "$APK" "out/MatrixGram-$VERSION-android-arm64.apk"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
-          npm run tauri -- signer sign --app-version "$VERSION" "out/MatrixGram-$VERSION-android-arm64.apk"
+          npm run tauri -- signer sign --app-version "$VERSION" "$GITHUB_WORKSPACE/out/MatrixGram-$VERSION-android-arm64.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: signed-android
