@@ -7,10 +7,14 @@ on:
       tag:
         description: Existing release tag, for example v0.5.2
         required: true
+      recovery:
+        description: Bypass a stuck concurrency group for a manual recovery run
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-${{ inputs.tag || github.ref_name }}${{ inputs.recovery && format('-recovery-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 jobs:
   windows:
