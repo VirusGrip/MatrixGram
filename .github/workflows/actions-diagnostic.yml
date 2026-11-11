@@ -1,0 +1,19 @@
+name: Actions startup diagnostic
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Confirm Linux runner starts
+        shell: bash
+        run: echo "Actions runner started on $RUNNER_OS"
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 3
+    steps:
+      - name: Confirm Windows runner starts
+        shell: pwsh
+        run: Write-Output "Actions runner started on $env:RUNNER_OS"
