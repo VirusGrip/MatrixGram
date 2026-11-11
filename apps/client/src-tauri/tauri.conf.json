@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MatrixGram",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "identifier": "ru.madfrog.matrixgram",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -45,6 +45,19 @@
     },
     "android": {
       "minSdkVersion": 26
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEREOThDN0M3NjUzMTJDRUEKUldUcUxERmx4OGVZM1RBZENCMjhGTTBOQWlUeDZQUm9WRmtPZ0pJNDhjekZpT3MrS1hSNkhPWVcK",
+      "requireSignedVersion": true,
+      "endpoints": [
+        "https://github.com/VirusGrip/MatrixGram/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

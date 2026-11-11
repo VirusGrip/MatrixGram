@@ -175,6 +175,25 @@ mod android {
             }
         }
     }
+    pub fn update_bridge(method: &str) -> Result<String> {
+        let (vm, activity) = bridge()?;
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|_| CoreError::User("Android недоступен".into()))?;
+        let result = env.call_method(activity.as_obj(), method, "()Ljava/lang/String;", &[]);
+        match result.and_then(|value| value.l()) {
+            Ok(value) => {
+                let value: jni::objects::JString = value.into();
+                env.get_string(&value)
+                    .map(|value| value.into())
+                    .map_err(|_| CoreError::User("Не удалось получить ответ Android".into()))
+            }
+            Err(_) => {
+                let _ = env.exception_clear();
+                Err(CoreError::User("Android не смог подготовить обновление. Проверьте подпись APK и разрешение установки.".into()))
+            }
+        }
+    }
     pub fn save_file(name: &str, bytes: &[u8]) -> Result<bool> {
         let (vm, activity) = bridge()?;
         let mut env = vm
@@ -251,4 +270,13 @@ mod tests {
         clear(&path).unwrap();
         assert!(load(&path).unwrap().is_none());
     }
+}
+
+#[cfg(target_os = "android")]
+pub fn android_update_path() -> Result<String> {
+    android::update_bridge("getUpdatePath")
+}
+#[cfg(target_os = "android")]
+pub fn android_install_update() -> Result<String> {
+    android::update_bridge("installUpdate")
 }

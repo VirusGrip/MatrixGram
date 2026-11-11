@@ -18,6 +18,8 @@ const mediaStore={};
 const pixel='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
 const publish=roomId=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[{roomId,events,next:null}],connection:'online',error:null}));
 export const api = {
+ updateStatus:async()=>({currentVersion:'0.5.2',configured:false,platform:'windows',repository:'VirusGrip/MatrixGram',available:null}),
+ checkUpdate:async()=>({currentVersion:'0.5.2',configured:true,platform:'windows',repository:'VirusGrip/MatrixGram',available:null}),downloadUpdate:async()=>{},installUpdate:async()=>{window.__updateInstalled=true;return 'started'},
  bootstrap:async()=>null, login:async()=>{setTimeout(()=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[],connection:'online',error:null})),30);return session}, rooms:async()=>[...rooms], logout:async()=>{}, forget:async()=>{},
  cached:async id=>id==='!plain:test'?events:[], history:async id=>{if(id==='!secret:test')window.__secretHistoryCount=(window.__secretHistoryCount||0)+1;return {roomId:id,events:id==='!plain:test'?events:id==='!secret:test'&&encryption.enabled?[{event_id:'$secret',sender:'@bob:test',type:'m.room.message',origin_server_ts:2000,content:{body:'Открытое сообщение E2EE'}}]:[],next:null}},
  draft:async id=>drafts[id]||'',saveDraft:async(id,body)=>{drafts[id]=body},typing:async()=>{},read:async()=>{},
@@ -61,6 +63,7 @@ export const api = {
  desktop:async autostart=>({desktop:true,autostart:!!autostart}),minimize:async()=>{},notify:async()=>{},openUrl:async url=>{window.__openedUrl=url},
  accounts:async()=>({entries:[],active:null}),addAccount:async()=>session,switchAccount:async()=>session,mediaPermissions:async()=>true,requestNotifications:async()=>true
 };
+export const onAppUpdateProgress=async()=>()=>{};
 export const onTransfer=async()=>()=>{};
 export const onUpdate=async callback=>{updates.add(callback);return ()=>updates.delete(callback)};
 export const onConnection=async()=>()=>{};

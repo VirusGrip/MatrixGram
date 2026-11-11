@@ -1,0 +1,15 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const args=process.argv.slice(2), option=name=>args[args.indexOf(name)+1];
+const repository=option('--repository'), keyFile=option('--public-key-file');
+if(!args.includes('--repository')||!args.includes('--public-key-file')||!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository))throw Error('Provide --repository OWNER/REPO --public-key-file PATH');
+const publicKey=readFileSync(keyFile,'utf8').trim();
+if(!Buffer.from(publicKey,'base64').toString('utf8').includes('untrusted comment:'))throw Error('Expected a Tauri public key');
+writeFileSync(path.join(root,'apps/client/src-tauri/updates.json'),JSON.stringify({repository,publicKey},null,2)+'\n');
+const file=path.join(root,'apps/client/src-tauri/tauri.conf.json'),config=JSON.parse(readFileSync(file,'utf8'));
+config.bundle.createUpdaterArtifacts=true;
+config.plugins={...config.plugins,updater:{pubkey:publicKey,requireSignedVersion:true,endpoints:[`https://github.com/${repository}/releases/latest/download/latest.json`],windows:{installMode:'passive'}}};
+writeFileSync(file,JSON.stringify(config,null,2)+'\n');
+console.log('Configured signed updates for '+repository);

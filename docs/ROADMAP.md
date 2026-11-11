@@ -1,4 +1,4 @@
-# Состояние после расширения 0.5.1
+# Состояние после расширения 0.5.2
 
 Историческое ТЗ — original-spec.ru.md. Актуальные пожелания пользователя имеют приоритет: необязательное E2EE, поиск по отображаемому имени, ПАПКИ и оформление по примеру Telegram. Серверная инфраструктура не менялась.
 
@@ -13,7 +13,7 @@
 | Комнаты | private/public, каналы, участники, роли, invite/kick/ban, настройки, каталог/join/leave | гибкий редактор power levels, список банов/unban UI, пространства Matrix |
 | Медиа | upload/download/preview/save, голосовые, прогресс/отмена/retry | resumable upload, альбомы, стикеры/GIF, транскрипция |
 | Звонки | Matrix VoIP v1 1:1, WebRTC, TURN discovery, устройства/экран | проверка реального TURN и Element, group MatrixRTC, push входящего вызова |
-| Windows | EXE/NSIS, native tray/autostart/notification integration | чистые Windows 10/11, install/uninstall/update, подпись |
-| Android | общий клиент, Keystore/JNI TLS, Back/share/permissions/save | runtime на телефоне, lifecycle/фон, push/foreground service, release signing |
+| Windows | EXE/NSIS, signed updater, GitHub release workflow, tray/autostart/notifications | проверка перехода между версиями, чистые Windows 10/11, Authenticode |
+| Android | общий клиент, Keystore/JNI TLS, APK updater, Back/share/permissions/save | runtime на телефоне, lifecycle/фон, push/foreground service, release signing |
 
 Первым следует проверить новый клиент на отдельном тестовом аккаунте с Element: обычные/E2EE вложения и ключи, затем звонки через relay-only TURN. Далее — чистая установка Windows и Android на устройстве. Тестовый IPC и локальные WebRTC peers этих проверок не заменяют.

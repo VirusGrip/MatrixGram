@@ -1,4 +1,4 @@
-# Android 0.5.1
+# Android 0.5.2
 
 Клиент использует общий Rust SDK и React UI. В исходниках есть JNI bridge для Android Keystore, TLS verifier, разрешений, системного сохранения, Back и ACTION_SEND/ACTION_SEND_MULTIPLE. Браузерный viewport не подтверждает работу APK на телефоне. Статус APK указан в PROGRESS.md.
 
@@ -29,3 +29,8 @@ prepare-android добавляет permissions, share intent filters, min/target
 Debug APK использует тестовую подпись и предназначен для проверки. Для распространяемого release нужен отдельный signing keystore вне Git. Не заменяйте чужую/production подпись автоматически.
 
 Подготовлен ручной workflow `.github/workflows/android.yml` на Ubuntu 24.04, JDK 21 и закреплённом NDK. Наличие SDK проверено по [образу GitHub runner](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md). Сам workflow на GitHub не запускался: репозиторий не опубликован. Windows workflow запускает тесты всего workspace.
+
+
+Обновления APK реализованы через собственный JNI bridge и системный установщик: `REQUEST_INSTALL_PACKAGES`, ограниченный FileProvider private cache, проверка подписи, package ID и versionCode. Updater Tauri предназначен для desktop, поэтому его установка на Android не вызывается. [Канал обновлений](UPDATES.md).
+
+Release CI задаёт MATRIXGRAM_ANDROID_KEYSTORE_PATH, MATRIXGRAM_ANDROID_STORE_PASSWORD, MATRIXGRAM_ANDROID_KEY_ALIAS и MATRIXGRAM_ANDROID_KEY_PASSWORD. prepare-android добавляет постоянную signingConfig для release. Старые тестовые установки требуют исходного debug keystore; переход на случайную подпись runner не допускается. Локальная debug-сборка и сборка release в GitHub — разные артефакты, их статус указан в PROGRESS.

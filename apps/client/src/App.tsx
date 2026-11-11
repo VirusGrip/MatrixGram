@@ -22,6 +22,7 @@ import { presentRoom } from './roomPresentation';
 import { userTitle } from './contacts';
 import { cachedTimeline, emptyEvents } from './timelineCache';
 import { filterRooms } from './roomFilter';
+import { registerUpdatePreparation } from './UpdatePreparation';
 const timeFormat = new Intl.DateTimeFormat('ru-RU', {hour:'2-digit',minute:'2-digit'});
 const time = (ts: number) => timeFormat.format(ts);
 const dateFormat = new Intl.DateTimeFormat('ru-RU', {day:'numeric',month:'long'});
@@ -62,7 +63,7 @@ function Login({ loading }: { loading: boolean }) {
       <p className="login-note"><KeyRound size={17}/>Зашифрованные комнаты можно открыть после входа.<br/>Восстановление ключей необязательно.</p>
       {!loading && nativeAvailable() && <Accounts savedOnly/>}
     </section>
-    <footer>MatrixGram · 0.5.1 · ранняя версия</footer>
+    <footer>MatrixGram · 0.5.2 · ранняя версия</footer>
   </main>;
 }
 
@@ -146,6 +147,7 @@ function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSu
   const readThrough = useMemo(() => { let latest = 0; for (const [id, users] of Object.entries(receipts ?? {})) if (users.some(user => user !== session.userId)) latest = Math.max(latest, messagesById.get(id)?.ts ?? 0); return latest; }, [receipts, messagesById, session.userId]);
   const draftReady = useRef(false), draftBody = useRef(''), editing = useRef(false), scroll = useRef<HTMLDivElement>(null), stick = useRef(true), initialScroll = useRef(true), typingAt = useRef(0);
   draftBody.current = body; editing.current = edit !== null;
+  useEffect(() => registerUpdatePreparation(async () => { if (draftReady.current && !editing.current) await api.saveDraft(room.id, draftBody.current); }), [room.id]);
   const filtered = useMemo(() => messages.filter(m => !find || m.body.toLocaleLowerCase().includes(find.toLocaleLowerCase())), [messages, find]);
   const list = useRef<HTMLDivElement>(null);
   const [listOffset, setListOffset] = useState(0);

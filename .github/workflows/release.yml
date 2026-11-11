@@ -1,0 +1,150 @@
+name: Signed MatrixGram release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, for example v0.5.2
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      CARGO_BUILD_JOBS: '2'
+      MATRIXGRAM_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - run: node scripts/check-release-version.mjs
+      - run: cargo test --workspace --locked
+      - run: npm test
+      - run: node --test scripts/release-manifest.test.mjs scripts/release-version.test.mjs
+      - run: npm run check:policy
+      - name: Build and sign Windows update
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw 'Configure updater signing secrets first' }
+          ./scripts/build-windows.ps1
+      - name: Collect Windows package
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force out | Out-Null
+          $name = "MatrixGram_${version}_x64-setup.exe"
+          Copy-Item -LiteralPath "target/release/bundle/nsis/$name" -Destination "out/$name"
+          Copy-Item -LiteralPath "target/release/bundle/nsis/$name.sig" -Destination "out/$name.sig"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-windows
+          path: out/*
+          if-no-files-found: error
+  android:
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_BUILD_JOBS: '2'
+      MATRIXGRAM_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-release
+      - name: Select SDK and NDK
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;29.0.14206865'
+          echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: node scripts/check-release-version.mjs
+      - run: npm run tauri -- android init --ci
+      - run: node scripts/prepare-android.mjs
+      - name: Build with persistent Android signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          MATRIXGRAM_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/matrixgram.jks
+          MATRIXGRAM_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          MATRIXGRAM_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          MATRIXGRAM_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo 'Configure the existing Android signing key first'; exit 1; }
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$MATRIXGRAM_ANDROID_KEYSTORE_PATH"
+          chmod 600 "$MATRIXGRAM_ANDROID_KEYSTORE_PATH"
+          npm run tauri -- android build --apk --target aarch64 --ci
+      - name: Collect and sign Android update
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo 'Configure updater signing secrets first'; exit 1; }
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p out
+          APK=$(find apps/client/src-tauri/gen/android/app/build/outputs/apk -name '*-release.apk' ! -name '*unsigned*' | head -n 1)
+          test -n "$APK"
+          cp "$APK" "out/MatrixGram-$VERSION-android-arm64.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+          npm run tauri -- signer sign --app-version "$VERSION" "out/MatrixGram-$VERSION-android-arm64.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-android
+          path: out/*
+          if-no-files-found: error
+  publish:
+    needs: [windows, android]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: signed-*
+          path: out
+          merge-multiple: true
+      - name: Publish complete release atomically
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          printf 'MatrixGram %s\n\nWindows: signed in-app update. Android: confirm the system installer.\n' "$VERSION" > out/RELEASE-NOTES.txt
+          node scripts/release-manifest.mjs "$GITHUB_REPOSITORY" "$VERSION" out out/RELEASE-NOTES.txt
+          git archive --format=zip --prefix="MatrixGram-$VERSION/" --output="out/MatrixGram-source-$VERSION.zip" HEAD
+          (cd out && sha256sum *.exe *.apk *.zip > SHA256SUMS.txt)
+          gh release create "$RELEASE_TAG" --verify-tag --draft --title "MatrixGram $VERSION" --notes-file out/RELEASE-NOTES.txt out/*
+          gh release edit "$RELEASE_TAG" --draft=false --latest

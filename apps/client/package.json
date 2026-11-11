@@ -1,6 +1,6 @@
 {
   "name": "@matrixgram/client",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -28,6 +28,6 @@
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.9.3",
     "vite": "^7.1.0",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.12"
   }
 }

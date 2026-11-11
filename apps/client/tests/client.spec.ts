@@ -484,3 +484,41 @@ test('partial batch retry skips delivered messages and reuses the failed transac
   const sent=await page.evaluate(()=>(window as any).__operations.filter((op:any)=>op.kind==='forward'));
   expect(sent.map((op:any)=>op.eventId)).toEqual(['$visual0','$visual1','$visual1','$visual2']);expect(sent[1].txn).toBe(sent[2].txn);
 });
+
+const updateFixture=(platform='windows',failure=false)=>fixtureApi+`
+const updateState={currentVersion:'0.5.2',configured:true,platform:'${platform}',repository:'VirusGrip/MatrixGram',available:null};
+Object.assign(api,{updateStatus:async()=>updateState,checkUpdate:async()=>({...updateState,available:{version:'0.5.3',notes:'Исправления <script>window.bad=true</script>'}}),downloadUpdate:async()=>{window.__updateDownloads=(window.__updateDownloads||0)+1;${failure?"throw Error('Подпись обновления не прошла проверку')":""}},installUpdate:async()=>{window.__updateInstalled=(window.__updateInstalled||0)+1;return '${platform==='android'?'permission':'started'}'}});
+`;
+
+test('signed update flow waits for download and persists the current draft',async({page})=>{
+  await login(page,updateFixture());await page.getByRole('button',{name:'Открыть Команда Matrix',exact:true}).click();
+  await page.getByRole('textbox',{name:'Сообщение',exact:true}).fill('Черновик перед обновлением');
+  await page.getByRole('button',{name:'Настройки',exact:true}).click();
+  await page.getByRole('button',{name:'Проверить обновления',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Установить и перезапустить',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Скачать обновление',exact:true}).click();
+  await expect(page.getByText('Обновление скачано и проверено',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Установить и перезапустить',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>(window as any).__updateInstalled)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).bad)).toBeUndefined();
+});
+test('signature failure never enables update installation',async({page})=>{
+  await login(page,updateFixture('windows',true));await page.getByRole('button',{name:'Настройки',exact:true}).click();
+  await page.getByRole('button',{name:'Проверить обновления',exact:true}).click();await page.getByRole('button',{name:'Скачать обновление',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('Подпись обновления не прошла проверку');
+  await expect(page.getByRole('button',{name:'Установить и перезапустить',exact:true})).toHaveCount(0);
+  expect(await page.evaluate(()=>(window as any).__updateInstalled)).toBeUndefined();
+});
+test('Android update permission keeps the verified download for another install attempt',async({page})=>{
+  await login(page,updateFixture('android'));await page.getByRole('button',{name:'Настройки',exact:true}).click();await page.getByRole('button',{name:'Проверить обновления',exact:true}).click();await page.getByRole('button',{name:'Скачать обновление',exact:true}).click();
+  await page.getByRole('button',{name:'Установить',exact:true}).click();await expect(page.getByRole('status')).toContainText('Разрешите установку');
+  await page.getByRole('button',{name:'Установить',exact:true}).click();expect(await page.evaluate(()=>(window as any).__updateDownloads)).toBe(1);expect(await page.evaluate(()=>(window as any).__updateInstalled)).toBe(2);
+});
+test('an up-to-date release shows a status without an installer button',async({page})=>{
+  await login(page,fixtureApi.replace('configured:false','configured:true'));await page.getByRole('button',{name:'Настройки',exact:true}).click();await page.getByRole('button',{name:'Проверить обновления',exact:true}).click();await expect(page.getByRole('status')).toContainText('Установлена актуальная версия');await expect(page.getByRole('button',{name:'Скачать обновление',exact:true})).toHaveCount(0);
+});
+
+test('draft save failure blocks update installation',async({page})=>{
+  const adapter=updateFixture()+`const originalSave=api.saveDraft;api.saveDraft=async(id,body)=>{if(window.__denyUpdateDraft)throw Error('Черновик не сохранён');return originalSave(id,body)};const originalDownload=api.downloadUpdate;api.downloadUpdate=async()=>{await originalDownload();window.__denyUpdateDraft=true};`;
+  await login(page,adapter);await page.getByRole('button',{name:'Открыть Команда Matrix',exact:true}).click();await page.getByRole('textbox',{name:'Сообщение',exact:true}).fill('Сохранить перед обновлением');await page.getByRole('button',{name:'Настройки',exact:true}).click();await page.getByRole('button',{name:'Проверить обновления',exact:true}).click();await page.getByRole('button',{name:'Скачать обновление',exact:true}).click();await page.getByRole('button',{name:'Установить и перезапустить',exact:true}).click();await expect(page.locator('.app-updates').getByRole('alert')).toContainText('Черновик не сохранён');expect(await page.evaluate(()=>(window as any).__updateInstalled)).toBeUndefined();
+});

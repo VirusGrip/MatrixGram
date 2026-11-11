@@ -629,3 +629,6 @@ impl Account {
         vault::clear(&data_dir.join("session.dpapi"))
     }
 }
+
+#[cfg(target_os = "android")]
+pub use vault::{android_install_update, android_update_path};

@@ -49,3 +49,5 @@ export function CallButtons({ room }: { room: RoomSummary }) {
   const start = (video: boolean) => { void engine.start(room.id, video).catch(e => useStore.getState().setError(errorText(e))); };
   return <><button className="icon-button" aria-label="Позвонить" onClick={() => start(false)}><Phone size={20}/></button><button className="icon-button" aria-label="Видеозвонок" onClick={() => start(true)}><Video size={21}/></button></>;
 }
+
+export const activeCall = () => useCalls.getState().state !== null;

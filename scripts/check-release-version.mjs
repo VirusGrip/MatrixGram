@@ -1,0 +1,12 @@
+import {readFileSync} from 'node:fs';
+const version=JSON.parse(readFileSync('package.json','utf8')).version;
+if(!/^\d+\.\d+\.\d+$/.test(version))throw Error('Only stable SemVer releases are supported');
+for(const file of ['apps/client/package.json','apps/client/src-tauri/tauri.conf.json'])if(JSON.parse(readFileSync(file,'utf8')).version!==version)throw Error('Version mismatch in '+file);
+if(!readFileSync('Cargo.toml','utf8').includes(`version = "${version}"`))throw Error('Workspace version mismatch');
+const ref=process.env.MATRIXGRAM_RELEASE_TAG||process.env.GITHUB_REF_NAME;
+if(ref&&ref!==`v${version}`)throw Error('Tag must equal v'+version);
+const update=JSON.parse(readFileSync('apps/client/src-tauri/updates.json','utf8'));
+const config=JSON.parse(readFileSync('apps/client/src-tauri/tauri.conf.json','utf8'));
+if(!update.publicKey||config.plugins?.updater?.pubkey!==update.publicKey||!config.plugins.updater.requireSignedVersion)throw Error('Updater signing configuration mismatch');
+if(process.env.GITHUB_REPOSITORY&&process.env.GITHUB_REPOSITORY!==update.repository)throw Error('Release repository differs from the embedded updater source');
+console.log(version);

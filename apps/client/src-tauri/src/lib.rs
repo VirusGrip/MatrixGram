@@ -9,6 +9,8 @@ use std::{sync::Arc, time::Duration};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::{Mutex, RwLock};
 mod accounts;
+mod update_policy;
+mod updates;
 
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
@@ -748,6 +750,8 @@ pub fn run() {
             let _ = app;
             #[cfg(desktop)]
             {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
                 use tauri::{
                     menu::{Menu, MenuItem},
                     tray::TrayIconBuilder,
@@ -781,6 +785,7 @@ pub fn run() {
             Ok(())
         })
         .manage(Backend::default())
+        .manage(updates::Updates::default())
         .invoke_handler(tauri::generate_handler![
             bootstrap,
             login,
@@ -820,7 +825,11 @@ pub fn run() {
             add_account,
             switch_account,
             media_permissions,
-            request_notifications
+            request_notifications,
+            updates::update_status,
+            updates::check_update,
+            updates::download_update,
+            updates::install_update
         ])
         .run(tauri::generate_context!())
         .expect("Не удалось запустить MatrixGram");

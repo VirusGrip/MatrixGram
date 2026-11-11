@@ -67,6 +67,38 @@ class MainActivity : TauriActivity() {
     receiveShare(intent)
   }
 
+  // Only native Rust calls these methods, after verifying the signed update package.
+  fun getUpdatePath(): String {
+    val directory = java.io.File(cacheDir, "updates").apply { mkdirs() }
+    return java.io.File(directory, "matrixgram.apk").absolutePath
+  }
+
+  @Suppress("DEPRECATION")
+  fun installUpdate(): String {
+    val apk = java.io.File(getUpdatePath())
+    require(apk.isFile) { "Update is missing" }
+    val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+    val incoming = packageManager.getPackageArchiveInfo(apk.absolutePath, flags) ?: error("Invalid APK")
+    val current = packageManager.getPackageInfo(packageName, flags)
+    require(incoming.packageName == packageName) { "Wrong package" }
+    val incomingVersion = if (Build.VERSION.SDK_INT >= 28) incoming.longVersionCode else incoming.versionCode.toLong()
+    val currentVersion = if (Build.VERSION.SDK_INT >= 28) current.longVersionCode else current.versionCode.toLong()
+    require(incomingVersion > currentVersion) { "Update must be newer" }
+    fun certificates(info: android.content.pm.PackageInfo): Set<String> {
+      val signatures = if (Build.VERSION.SDK_INT >= 28) info.signingInfo?.apkContentsSigners else info.signatures
+      return signatures.orEmpty().map { Base64.encodeToString(it.toByteArray(), Base64.NO_WRAP) }.toSet()
+    }
+    val installedCertificates = certificates(current)
+    require(installedCertificates.isNotEmpty() && installedCertificates == certificates(incoming)) { "Signing key mismatch" }
+    if (!packageManager.canRequestPackageInstalls()) {
+      runOnUiThread { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))) }
+      return "permission"
+    }
+    val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.updates", apk)
+    runOnUiThread { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
+    return "started"
+  }
+
   // Invoked only through JNI from Rust. No JavascriptInterface exposes these methods.
   fun protectVault(bytes: ByteArray, encrypt: Boolean): ByteArray = synchronized(vaultLock) {
     val alias = "MatrixGram.session.v1"
@@ -182,3 +214,5 @@ class MainActivity : TauriActivity() {
     }
   }
 }
+
+class MatrixGramUpdateProvider : androidx.core.content.FileProvider()

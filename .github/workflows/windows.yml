@@ -1,6 +1,8 @@
-name: Windows checks and build
+name: Windows checks and manual preview build
 on:
   push:
+    branches: [main]
+    paths-ignore: ["docs/**", "PROGRESS.md", "README.md"]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -36,9 +38,11 @@ jobs:
           name: MatrixGram-performance
           path: apps/client/performance-results/*.json
           if-no-files-found: warn
-      - run: ./scripts/build-windows.ps1
+      - run: ./scripts/build-windows.ps1 -Unsigned
+        if: github.event_name == 'workflow_dispatch'
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
         with:
           name: MatrixGram-Windows-unsigned
           path: |

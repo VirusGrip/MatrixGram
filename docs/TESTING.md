@@ -1,4 +1,4 @@
-# Проверки 0.5.1
+# Проверки 0.5.2
 
 Фактические числа и артефакты зафиксированы в PROGRESS.md. Тесты ниже запускаются локально; они не входят в production приложение.
 
@@ -32,3 +32,16 @@ cargo test --workspace --locked cache_load_100000_events -- --ignored --nocaptur
 ```
 
 Нагрузочные тесты отделены от обычного Playwright-набора. Используется локальный IPC, не Synapse. JSON отчёт браузера: `apps/client/performance-results/browser-current.json`; native метрики печатаются как `LOAD_CACHE_JSON`. Профиль, пороги, параметры длительного прогона и пределы интерпретации — [PERFORMANCE.md](PERFORMANCE.md). Windows workflow содержит эти шаги, но на GitHub в этой разработке не запускался.
+
+
+## Updater
+
+Rust: настоящая подпись отдельным test key, tamper, подмена версии, запрет downgrade/prerelease и чужих URL. Frontend unit: ожидание сохранения черновиков и ошибки callback. Playwright: цепочка check/download/install, plain-text notes, подпись/ошибка, Android permission/retry без повторного download, актуальная версия, отказ при несохранённом черновике. Node: manifest обеих платформ и согласованность bump версий.
+
+```powershell
+node --test scripts/release-manifest.test.mjs scripts/release-version.test.mjs
+node scripts/check-workflows.mjs
+node scripts/check-release-version.mjs
+```
+
+Реально проверить: установить 0.5.2, опубликовать следующую тестовую версию, обновить через Settings с сохранением сессии/E2EE/подписей/папок на Windows 10/11 и Android arm64. Проверить сеть/отказ разрешения/отмену установщика/нехватку места/неправильный сертификат APK. Не считать mock UI или подпись файла проверкой успешной установки.

@@ -4,6 +4,10 @@ import type { SessionInfo, RoomSummary, MatrixEvent, TimelinePage, Update, Encry
 
 export const nativeAvailable = () => isTauri();
 export const api = {
+  updateStatus: () => invoke<import('./UpdatesPanel').UpdateStatus>('update_status'),
+  checkUpdate: () => invoke<import('./UpdatesPanel').UpdateStatus>('check_update'),
+  downloadUpdate: () => invoke<void>('download_update'),
+  installUpdate: () => invoke<string>('install_update'),
   bootstrap: () => invoke<SessionInfo | null>('bootstrap'),
   login: (homeserver: string, username: string, password: string) => invoke<SessionInfo>('login', { homeserver, username, password }),
   logout: () => invoke<void>('logout'),
@@ -52,3 +56,5 @@ export function onUpdate(callback: (sessionKey: string, update: Update) => void)
 export function onConnection(callback: (sessionKey: string, error: string) => void) {
   return listen<{ sessionKey: string; error: string }>('matrix-connection', ({ payload }) => callback(payload.sessionKey, payload.error));
 }
+
+export const onAppUpdateProgress = (callback:(value:{phase:string;downloaded:number;total:number|null})=>void) => listen('app-update-progress', event=>callback(event.payload as Parameters<typeof callback>[0]));

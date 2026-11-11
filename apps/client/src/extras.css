@@ -161,3 +161,6 @@ body { zoom: var(--ui-scale, 1); }
   .room-info { height: calc(100dvh / var(--ui-scale, 1)); }
   .voice-meter { width: 35px; }
 }
+
+.app-updates .text-button, .app-updates .primary { display: inline-flex; gap: 8px; align-items: center; }
+.update-notes { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow-y: auto; font-size: 13px; }

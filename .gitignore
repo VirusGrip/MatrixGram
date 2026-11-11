@@ -17,3 +17,10 @@ apps/client/src-tauri/gen/
 Thumbs.db
 
 performance-results/
+
+*.key
+*.key.pub
+*.password.dpapi
+release-secrets/
+
+/out/
