@@ -13,7 +13,13 @@
 
 Локально прошли 47 Rust-тестов (40 core + 7 приложения), 43 frontend unit, 48 Playwright, 2 Node release-tool теста, production build, Clippy и policy. Отдельная браузерная нагрузка: 5 000 комнат / 60 000 событий / 40 sync / CPU ×4 и 200 E2EE-превью с двумя workers; оба сценария прошли после устранения лишней предварительной загрузки обычных чатов. Первый нагрузочный прогон выявил эту проблему и завершился timeout; это исправленный дефект, не успешный результат первого запуска.
 
-Сборка и публикация 0.5.4 ещё выполняются. Реальный клик по Windows toast/центру уведомлений, переход между установленными версиями и физический Android не проверены; IPC/SQLite/DPAPI-тесты их не заменяют.
+**0.5.4 опубликована 16 ноября 2026 в 13:31 МСК:** [релиз](https://github.com/VirusGrip/MatrixGram/releases/tag/v0.5.4), [Windows x64](https://github.com/VirusGrip/MatrixGram/releases/download/v0.5.4/MatrixGram_0.5.4_x64-setup.exe), [Android arm64](https://github.com/VirusGrip/MatrixGram/releases/download/v0.5.4/MatrixGram-0.5.4-android-arm64.apk). [Полные CI-проверки](https://github.com/VirusGrip/MatrixGram/actions/runs/43846426836) и [подписанный выпуск](https://github.com/VirusGrip/MatrixGram/actions/runs/43846440038) завершились успешно. Первая Android-компиляция выявила вызов desktop-only API; обработчик ограничен desktop в итоговом исходном commit.
+
+Проверены опубликованные SHA-256, minisign/подписанная версия Windows и APK, APK v2 и исходный сертификат Android, package ID/versionCode 5004/arm64/JNI/TLS/update provider, CRC и полное совпадение source ZIP с Git-деревом тега. Публичный `latest.json` без авторизации вернул HTTP 200 и 0.5.4 для обеих платформ. NSIS не имеет Authenticode-подписи; updater-подпись проверена. Локальные официальные пакеты и `BUILD-0.5.4.json` находятся в `releases/`, прежние версии сохранены.
+
+Тег `v0.5.4`: `9908a3dee794110f88749ad4efe2c559e0105e01`. Итоги выпуска и [облачные метрики](docs/performance-0.5.4-ci.json) записаны в main отдельно после сборки. CI IPC-нагрузка: sync median 182,6 мс / p95 199,8 мс, поиск 147,7 мс, heap 29,6 → 30,3 МБ; это не контролируемое сравнение с предыдущей версией.
+
+Реальный клик по Windows toast/центру уведомлений, переход между установленными версиями и физический Android не проверены; IPC/SQLite/DPAPI-тесты их не заменяют. Из 0.5.2/0.5.3 новую версию получают через Настройки → Обновления MatrixGram → Проверить; автоматическое объявление следующих версий появляется после установки 0.5.4.
 
 ## Исправления 0.5.3
 

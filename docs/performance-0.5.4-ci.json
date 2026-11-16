@@ -1,0 +1,17 @@
+{
+  "rooms": 5000,
+  "seedEvents": 60000,
+  "burstCount": 40,
+  "cpuThrottle": 4,
+  "startupMs": 5642.399999999907,
+  "searchMs": 147.69999999995343,
+  "syncMedianMs": 182.59999999997672,
+  "syncP95Ms": 199.79999999993015,
+  "syncMaxMs": 204.30000000004657,
+  "heapBeforeBytes": 29603740,
+  "heapAfterBytes": 30320320,
+  "longTaskCount": 61,
+  "longTaskMaxMs": 1394,
+  "browser": "chromium",
+  "fixture": "local IPC; Vite development build; not Synapse or native WebView2"
+}
