@@ -20,11 +20,13 @@ interface Store {
   apply: (key: string, update: Update) => void;
   select: (id: string | null) => void;
   load: (id: string, older?: boolean) => Promise<void>;
+  hydrate: (id: string) => Promise<void>;
   send: (roomId: string, body: string, replyTo?: string, txn?: string) => Promise<boolean>;
   clear: () => void;
 }
 const empty = { session: null, rooms: [], activeRoom: null, events: {}, cursors: {}, profiles: {}, canSend: {}, pending: [], connection: 'connecting', error: null, encryption: { enabled: false, backupReady: false }, folders: [], typing: {}, receipts: {} };
 const historyRequests = new WeakMap<SessionInfo, Map<string, { promise: Promise<void>; encryption: EncryptionStatus }>>();
+const cacheRequests = new WeakMap<SessionInfo, Map<string, { promise: Promise<void>; encryption: EncryptionStatus }>>();
 const loadedPages = new WeakMap<SessionInfo, Map<string, { at: number; encryption: EncryptionStatus }>>();
 function pageState(state: Store, pages: TimelinePage[]) {
   const events = { ...state.events }, profiles = { ...state.profiles }, canSend = { ...state.canSend };
@@ -74,11 +76,32 @@ export const useStore = create<Store>((set, get) => ({
       }
     }
     const pending = state.pending.filter(p => !receivedTxn.has(p.txn) && !(p.eventId && receivedIds.has(p.eventId)));
-    set({ rooms: update.rooms, ...pages, connection: update.connection, error: update.error,
+    const cacheWarning=update.timelines.find(page=>page.cacheWarning)?.cacheWarning;
+    set({ rooms: update.rooms, ...pages, connection: update.connection, error: update.error??(cacheWarning?`Не удалось сохранить кеш: ${cacheWarning}`:null),
       typing, receipts,
       pending: pending.length === state.pending.length ? state.pending : pending });
   },
   select: activeRoom => set({ activeRoom }),
+  hydrate: async id => {
+    const { session, encryption } = get(); if (!session) return;
+    let requests = cacheRequests.get(session);
+    if (!requests) { requests = new Map(); cacheRequests.set(session, requests); }
+    const existing = requests.get(id); if (existing?.encryption === encryption) return existing.promise;
+    const promise = (async () => {
+      const cached = await api.cached(id).catch(() => null);
+      if (!cached || get().session !== session || get().encryption !== encryption) return;
+      set(s => {
+        const restored = pageState(s, [cached]);
+        // A live sync can finish while the disk read is pending.
+        restored.events[id] = mergeEvents(cached.events,s.events[id]??[]);
+        restored.profiles[id] = {...restored.profiles[id],...s.profiles[id]};
+        if (s.canSend[id]!==undefined) restored.canSend[id]=s.canSend[id];
+        return {...restored,cursors:{...s.cursors,[id]:s.cursors[id]??cached.next}};
+      });
+    })();
+    requests.set(id, { promise, encryption });
+    return promise;
+  },
   load: (id, older = false) => {
     const session = get().session;
     if (!session) return Promise.resolve();
@@ -94,14 +117,12 @@ export const useStore = create<Store>((set, get) => ({
     const key = JSON.stringify([id, older, older ? get().cursors[id] ?? null : null]);
     const existing = requests.get(key); if (existing?.encryption === encryption) return existing.promise;
     const request = (async () => {
-      if (!older && !get().events[id]) {
-        const cached = await api.cached(id);
-        if (get().session !== session || get().encryption !== encryption) return;
-        set(s => pageState(s, [cached]));
-      }
+      if (!older) await get().hydrate(id);
+      if (get().session !== session || get().encryption !== encryption) return;
+      if (!older && get().connection !== 'online') return;
       const page = await api.history(id, older ? get().cursors[id] ?? null : null);
       if (get().session !== session || get().encryption !== encryption) return;
-      set(s => ({ ...pageState(s, [page]), cursors: { ...s.cursors, [id]: page.next } }));
+      set(s => ({ ...pageState(s, [page]), cursors: { ...s.cursors, [id]: page.next }, ...(page.cacheWarning ? { error: `Не удалось сохранить кеш: ${page.cacheWarning}` } : {}) }));
       if (!older) {
         if (page.events.some(event => event.type === 'm.room.encrypted')) loaded.delete(id);
         else loaded.set(id, { at: Date.now(), encryption });

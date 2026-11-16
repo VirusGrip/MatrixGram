@@ -9,6 +9,8 @@ use std::{sync::Arc, time::Duration};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::{Mutex, RwLock};
 mod accounts;
+#[cfg_attr(mobile, allow(dead_code))]
+mod notifications;
 mod update_policy;
 mod updates;
 
@@ -692,16 +694,6 @@ fn minimize_to_tray(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|_| "Не удалось свернуть приложение".into())
 }
 #[tauri::command]
-fn native_notify(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
-    use tauri_plugin_notification::NotificationExt;
-    app.notification()
-        .builder()
-        .title(title.chars().take(100).collect::<String>())
-        .body(body.chars().take(240).collect::<String>())
-        .show()
-        .map_err(|_| "Не удалось показать уведомление".into())
-}
-#[tauri::command]
 fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     if !url.starts_with("https://") && !url.starts_with("http://") {
@@ -745,7 +737,14 @@ async fn request_notifications() -> Result<bool, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            notifications::focus(app)
+        }))
+        .plugin(tauri_plugin_deep_link::init());
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -754,6 +753,18 @@ pub fn run() {
             let _ = app;
             #[cfg(desktop)]
             {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        notifications::activate(&handle, &url);
+                    }
+                });
+                if let Some(urls) = app.deep_link().get_current()? {
+                    for url in urls {
+                        notifications::activate(app.handle(), &url);
+                    }
+                }
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
                 use tauri::{
@@ -790,6 +801,7 @@ pub fn run() {
         })
         .manage(Backend::default())
         .manage(updates::Updates::default())
+        .manage(notifications::Notifications::default())
         .invoke_handler(tauri::generate_handler![
             bootstrap,
             login,
@@ -823,7 +835,9 @@ pub fn run() {
             save_download,
             desktop_settings,
             minimize_to_tray,
-            native_notify,
+            notifications::native_notify,
+            notifications::pending_notification,
+            notifications::acknowledge_notification,
             open_url,
             list_accounts,
             add_account,

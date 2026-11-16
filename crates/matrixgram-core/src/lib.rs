@@ -2,6 +2,7 @@ pub mod cache;
 mod features;
 #[cfg(test)]
 mod integration_tests;
+mod local_history;
 pub mod models;
 pub mod operations;
 pub mod policy;
@@ -57,6 +58,8 @@ pub struct Account {
     e2ee_enabled: AtomicBool,
     direct_lock: tokio::sync::Mutex<()>,
     draft_lock: std::sync::Mutex<()>,
+    page_cache_lock: std::sync::Mutex<()>,
+    has_synced: AtomicBool,
     store_path: PathBuf,
 }
 
@@ -78,7 +81,7 @@ pub(crate) fn mentioned_users(
 
 async fn build_client(homeserver: &str, store_path: &Path, passphrase: &str) -> Result<Client> {
     install_tls();
-    Client::builder()
+    let client = Client::builder()
         .homeserver_url(homeserver)
         .sqlite_store(store_path.join("sdk-e2ee-v1"), Some(passphrase))
         .with_encryption_settings(EncryptionSettings {
@@ -90,7 +93,17 @@ async fn build_client(homeserver: &str, store_path: &Path, passphrase: &str) -> 
         .respect_login_well_known(false)
         .build()
         .await
-        .map_err(network_error)
+        .map_err(network_error)?;
+    client
+        .media()
+        .set_media_retention_policy(
+            matrix_sdk::media::MediaRetentionPolicy::new()
+                .with_max_cache_size(Some(256 * 1024 * 1024))
+                .with_max_file_size(Some(26 * 1024 * 1024)),
+        )
+        .await
+        .map_err(network_error)?;
+    Ok(client)
 }
 
 impl Account {
@@ -207,6 +220,8 @@ impl Account {
             e2ee_enabled,
             direct_lock: tokio::sync::Mutex::new(()),
             draft_lock: std::sync::Mutex::new(()),
+            page_cache_lock: std::sync::Mutex::new(()),
+            has_synced: AtomicBool::new(false),
             store_path,
         })
     }
@@ -258,6 +273,12 @@ impl Account {
     }
 
     pub async fn rooms(&self) -> Result<Vec<RoomSummary>> {
+        if !self.has_synced.load(Ordering::Acquire) {
+            let cached = self.cache.rooms()?;
+            if !cached.is_empty() {
+                return Ok(cached);
+            }
+        }
         let mut result = Vec::new();
         for room in self.client.rooms() {
             if room.state() == RoomState::Left || room.state() == RoomState::Banned {
@@ -370,6 +391,7 @@ impl Account {
                     network_error(error)
                 }
             })?;
+        self.has_synced.store(true, Ordering::Release);
         let mut timelines = Vec::new();
         let mut ephemeral = Vec::new();
         for (id, room) in response.rooms.joined {
@@ -421,15 +443,19 @@ impl Account {
                 })
                 .collect::<Vec<_>>();
             if !events.is_empty() || !state_events.is_empty() {
-                timelines.push(
-                    self.timeline_page(
+                let mut page = self
+                    .timeline_page(
                         id.as_str(),
                         events,
                         room.timeline.prev_batch,
                         changed_members,
                     )
-                    .await?,
-                );
+                    .await?;
+                page.cache_warning = self
+                    .remember_page(&page, false)
+                    .err()
+                    .map(|error| error.to_string());
+                timelines.push(page);
             }
         }
         Ok(Update {
@@ -548,6 +574,10 @@ impl Account {
                 });
             }
         }
+        page.cache_warning = self
+            .remember_page(&page, from.is_none())
+            .err()
+            .map(|error| error.to_string());
         Ok(page)
     }
 
@@ -591,6 +621,7 @@ impl Account {
             events,
             next,
             profiles,
+            cache_warning: None,
             can_send: power.user_can_send_message(
                 room.own_user_id(),
                 matrix_sdk::ruma::events::MessageLikeEventType::RoomMessage,
@@ -599,6 +630,9 @@ impl Account {
     }
 
     pub async fn cached_page(&self, room_id: &str) -> Result<TimelinePage> {
+        if let Some(page) = self.restore_page(room_id)? {
+            return Ok(page);
+        }
         self.timeline_page(room_id, self.cached_timeline(room_id)?, None, Vec::new())
             .await
     }

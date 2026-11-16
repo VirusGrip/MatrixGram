@@ -81,6 +81,17 @@ impl Cache {
         Ok(())
     }
 
+    pub fn rooms(&self) -> Result<Vec<RoomSummary>> {
+        let db = self.0.lock().expect("cache mutex poisoned");
+        let mut query = db.prepare_cached("SELECT data FROM rooms")?;
+        let mut rooms = query
+            .query_map([], |row| row.get::<_, String>(0))?
+            .map(|row| Ok(serde_json::from_str::<RoomSummary>(&row?)?))
+            .collect::<Result<Vec<_>>>()?;
+        rooms.sort_by(|a, b| b.last_ts.cmp(&a.last_ts).then_with(|| a.name.cmp(&b.name)));
+        Ok(rooms)
+    }
+
     pub fn last_message(&self, room: &str) -> Result<(Option<String>, i64)> {
         let db = self.0.lock().expect("cache mutex poisoned");
         let mut query = db.prepare_cached("SELECT data,ts FROM events WHERE room_id=?1 AND json_extract(data,'$.type')='m.room.message'

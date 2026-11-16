@@ -10,6 +10,157 @@ struct Fixture {
     _dir: tempfile::TempDir,
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn protected_history_and_latest_rooms_restore_before_first_sync() {
+    let f = fixture(true).await;
+    f.account.e2ee_enabled.store(true, Ordering::Release);
+    f.account.cache.save_setting("e2ee_enabled", &true).unwrap();
+    let mut rooms = f.account.rooms().await.unwrap();
+    let mut added = rooms[0].clone();
+    added.id = "!later:example.org".into();
+    added.name = "Added after login".into();
+    rooms.push(added);
+    f.account.cache.save_rooms(&rooms).unwrap();
+    let events=(0..70).map(|i|json!({"event_id":format!("$private{i}"),"type":"m.room.message","sender":"@bob:example.org","origin_server_ts":i,"content":{"msgtype":"m.text","body":format!("PRIVATE-CACHE-MARKER-{i}")}})).collect();
+    let page = TimelinePage {
+        room_id: "!test:example.org".into(),
+        events,
+        next: Some("oldest".into()),
+        profiles: vec![SenderProfile {
+            user_id: "@bob:example.org".into(),
+            name: "Борис".into(),
+            avatar_url: Some("mxc://example.org/bob".into()),
+        }],
+        can_send: true,
+        cache_warning: None,
+    };
+    f.account.remember_page(&page, true).unwrap();
+    // A second SDK client deliberately has no room state. UI snapshots must not
+    // depend on completing an initial server sync to be usable.
+    let client = Client::builder()
+        .homeserver_url(f.server.uri())
+        .build()
+        .await
+        .unwrap();
+    client
+        .matrix_auth()
+        .restore_session(
+            f.account.client.matrix_auth().session().unwrap(),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    let restored = Account::from_client(
+        client,
+        f._dir.path(),
+        f.account.store_path.clone(),
+        f.server.uri(),
+        false,
+    )
+    .unwrap();
+    assert!(restored.client.rooms().is_empty());
+    assert_eq!(restored.rooms().await.unwrap().len(), 2);
+    let cached = restored.cached_page("!test:example.org").await.unwrap();
+    assert_eq!(cached.events.len(), 50);
+    assert_eq!(cached.events[0]["event_id"], "$private20");
+    assert_eq!(cached.profiles[0].name, "Борис");
+    assert_eq!(cached.next.as_deref(), Some("oldest"));
+    assert!(
+        restored
+            .cache
+            .events("!test:example.org")
+            .unwrap()
+            .is_empty()
+    );
+    for entry in std::fs::read_dir(restored.store_path.join("private-history")).unwrap() {
+        let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+        assert!(
+            !bytes
+                .windows(b"PRIVATE-CACHE-MARKER".len())
+                .any(|b| b == b"PRIVATE-CACHE-MARKER")
+        );
+    }
+    restored.e2ee_enabled.store(false, Ordering::Release);
+    assert!(
+        restored
+            .restore_page("!test:example.org")
+            .unwrap()
+            .is_none()
+    );
+    restored.e2ee_enabled.store(true, Ordering::Release);
+    let update = restored.sync_once().await.unwrap();
+    assert_eq!(update.rooms.len(), 1);
+    assert_eq!(restored.cache.rooms().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn media_cache_survives_client_recreation_offline_and_is_encrypted() {
+    let f = fixture(false).await;
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("media-account");
+    let client = build_client(&f.server.uri(), &store, "test-only-store-passphrase")
+        .await
+        .unwrap();
+    client
+        .matrix_auth()
+        .restore_session(
+            f.account.client.matrix_auth().session().unwrap(),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    let account =
+        Account::from_client(client, root.path(), store.clone(), f.server.uri(), false).unwrap();
+    let marker = b"PERSISTENT-IMAGE-CONTENT-TEST-PRIVATE";
+    Mock::given(method("GET"))
+        .and(path_regex(r"/.*media/.*download/.*"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(marker)
+                .insert_header("content-type", "image/png"),
+        )
+        .expect(1)
+        .mount(&f.server)
+        .await;
+    let source = json!({"url":"mxc://example.org/offline-image"});
+    let first = account.media_content(source.clone()).await.unwrap();
+    let session = account.client.matrix_auth().session().unwrap();
+    drop(account);
+    let client = build_client(&f.server.uri(), &store, "test-only-store-passphrase")
+        .await
+        .unwrap();
+    client
+        .matrix_auth()
+        .restore_session(session, Default::default())
+        .await
+        .unwrap();
+    let account =
+        Account::from_client(client, root.path(), store.clone(), f.server.uri(), false).unwrap();
+    let second = account.media_content(source).await.unwrap();
+    assert_eq!(first.data, second.data);
+    // The mock accepts exactly one network download across both clients.
+    f.server.verify().await;
+    assert_eq!(
+        account
+            .client
+            .media()
+            .media_retention_policy()
+            .await
+            .unwrap()
+            .max_cache_size,
+        Some(256 * 1024 * 1024)
+    );
+    for entry in std::fs::read_dir(store.join("sdk-e2ee-v1")).unwrap() {
+        let entry = entry.unwrap();
+        if !entry.file_type().unwrap().is_file() {
+            continue;
+        }
+        let bytes = std::fs::read(entry.path()).unwrap();
+        assert!(!bytes.windows(marker.len()).any(|b| b == marker));
+    }
+}
+
 #[tokio::test]
 async fn direct_chat_uses_peer_avatar_and_two_member_group_keeps_room_avatar() {
     let f = fixture(false).await;
@@ -1071,6 +1222,19 @@ async fn encrypted_media_download_decrypts_and_rejects_tampered_bytes() {
     );
     let mut corrupted = ciphertext;
     corrupted[0] ^= 1;
+    let mut wrong_descriptor = source.clone();
+    wrong_descriptor["file"]["hashes"]["sha256"] =
+        json!("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    assert!(f.account.media_content(wrong_descriptor).await.is_err());
+    let cache_request =
+        crate::operations::media_cache_request(&serde_json::from_value(source.clone()).unwrap())
+            .unwrap();
+    f.account
+        .client
+        .media()
+        .remove_media_content(&cache_request)
+        .await
+        .unwrap();
     Mock::given(method("GET"))
         .and(path_regex(
             r"/_matrix/client/v1/media/download/example.org/encrypted-download$",

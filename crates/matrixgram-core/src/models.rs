@@ -48,6 +48,8 @@ pub struct TimelinePage {
     pub next: Option<String>,
     pub profiles: Vec<SenderProfile>,
     pub can_send: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_warning: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

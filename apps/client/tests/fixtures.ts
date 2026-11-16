@@ -65,6 +65,9 @@ export const api = {
  accounts:async()=>({entries:[],active:null}),addAccount:async()=>session,switchAccount:async()=>session,mediaPermissions:async()=>true,requestNotifications:async()=>true
 };
 export const onAppUpdateProgress=async()=>()=>{};
+api.pendingNotification=async()=>window.__pendingNotification||null;
+api.acknowledgeNotification=async id=>{window.__notificationAcknowledged=id;window.__pendingNotification=null};
+export const onNotification=async callback=>{window.__notificationOpen=callback;return ()=>{if(window.__notificationOpen===callback)delete window.__notificationOpen}};
 export const onTransfer=async()=>()=>{};
 export const onUpdate=async callback=>{updates.add(callback);return ()=>updates.delete(callback)};
 export const onConnection=async()=>()=>{};

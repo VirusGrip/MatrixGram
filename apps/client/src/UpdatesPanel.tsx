@@ -1,15 +1,30 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
-import { api, onAppUpdateProgress } from './api';
+import { api, nativeAvailable, onAppUpdateProgress } from './api';
 import { errorText } from './ui';
 import { useUploads } from './Transfers';
 import { activeCall } from './Calls';
 import { prepareForUpdate } from './UpdatePreparation';
-export interface UpdateStatus {currentVersion:string;configured:boolean;platform:string;repository:string;available:{version:string;notes:string}|null}
+import { useUpdates, initializeUpdates, checkUpdates } from './UpdateService';
+import { Modal } from './ui';
+export type { UpdateStatus } from './UpdateService';
+export function UpdateNotice() {
+  const {status,open} = useUpdates();
+  useEffect(()=>{
+    if (!nativeAvailable()) return;
+    const check = () => { void initializeUpdates().then(()=>checkUpdates(true)).catch(()=>{}); };
+    check(); window.addEventListener('focus',check);
+    const timer = window.setInterval(check,15*60*1000);
+    const listener = onAppUpdateProgress(value=>{if(value.phase==='downloading')useUpdates.setState({progress:value.total?`${Math.min(100,Math.floor(value.downloaded/value.total*100))}%`:`${Math.floor(value.downloaded/1024/1024)} МБ`})});
+    return()=>{window.removeEventListener('focus',check);window.clearInterval(timer);void listener.then(off=>off()).catch(()=>{})};
+  },[]);
+  return <>{status?.available && !open && <button className="update-notice" onClick={()=>useUpdates.setState({open:true})} aria-live="polite"><Download size={18}/>Доступна MatrixGram {status.available.version} · Обновить</button>}{open&&<Modal title="Обновление MatrixGram" close={()=>useUpdates.setState({open:false})}><UpdatesPanel/></Modal>}</>;
+}
 export function UpdatesPanel() {
-  const [status,setStatus]=useState<UpdateStatus|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState(''),[ready,setReady]=useState(false),[progress,setProgress]=useState('');
-  useEffect(()=>{let mounted=true;void api.updateStatus().then(value=>{if(mounted)setStatus(value)}).catch(e=>{if(mounted)setError(errorText(e))});const listener=onAppUpdateProgress(value=>{if(!mounted)return;if(value.phase==='downloading')setProgress(value.total?`${Math.min(100,Math.floor(value.downloaded/value.total*100))}%`:`${Math.floor(value.downloaded/1024/1024)} МБ`)});return()=>{mounted=false;void listener.then(off=>off()).catch(()=>{})}},[]);
-  async function check() {setBusy(true);setError('');setMessage('');setReady(false);try{const value=await api.checkUpdate();setStatus(value);if(value.configured&&!value.available)setMessage('Установлена актуальная версия')}catch(e){setError(errorText(e))}finally{setBusy(false)}}
+  const {status,busy,error,message,ready,progress}=useUpdates();
+  const setBusy=(busy:boolean)=>useUpdates.setState({busy}),setError=(error:string)=>useUpdates.setState({error}),setMessage=(message:string)=>useUpdates.setState({message}),setReady=(ready:boolean)=>useUpdates.setState({ready}),setProgress=(progress:string)=>useUpdates.setState({progress});
+  useEffect(()=>{void initializeUpdates().catch(e=>setError(errorText(e)))},[]);
+  async function check() {await checkUpdates()}
   async function download() {setBusy(true);setError('');setProgress('0%');try{await api.downloadUpdate();setReady(true);setMessage('Обновление скачано и проверено')}catch(e){setError(errorText(e));setReady(false)}finally{setBusy(false);setProgress('')}}
   async function install() {
     if(activeCall()){setError('Завершите звонок перед установкой обновления');return}

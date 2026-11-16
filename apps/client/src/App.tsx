@@ -64,7 +64,7 @@ function Login({ loading }: { loading: boolean }) {
       <p className="login-note"><KeyRound size={17}/>Зашифрованные комнаты можно открыть после входа.<br/>Восстановление ключей необязательно.</p>
       {!loading && nativeAvailable() && <Accounts savedOnly/>}
     </section>
-    <footer>MatrixGram · 0.5.3 · ранняя версия</footer>
+    <footer>MatrixGram · 0.5.4 · ранняя версия</footer>
   </main>;
 }
 
@@ -166,6 +166,10 @@ function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSu
   const totalSize = rows.getTotalSize();
   const e2eeEnabled = useStore(s => s.encryption.enabled);
   const blocked = room.encryption === 'encrypted' && !e2eeEnabled;
+  const chatConnection = useStore(s => s.connection);
+  useEffect(() => {
+    if (chatConnection === 'online' && !blocked && room.membership === 'joined') void useStore.getState().load(room.id).catch(e => useStore.getState().setError(e));
+  }, [chatConnection, blocked, room.id, room.membership]);
 
   useEffect(() => {
     if (room.membership !== 'joined' || blocked) { setLoading(false); return; }
@@ -265,13 +269,13 @@ function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSu
                 {message.attachment && <MediaView attachment={message.attachment}/>}
                 <div className="message-body"><div className="message-text">{!message.attachment && <FormattedText html={message.formattedBody} fallback={message.body} onMention={setPerson}/>}</div><span className="message-meta">{message.edited && 'изменено · '}{time(message.ts)}{mine && (readThrough >= message.ts ? <CheckCheck size={14} aria-label="Прочитано"/> : <Check size={14} aria-label="Отправлено на сервер"/>)}</span></div>
                 {message.reactions.length > 0 && <div className="reactions">{message.reactions.map(r => <span key={r.key}>{r.key} {r.count}</span>)}</div>}
-                {!selecting && !message.deleted && !message.encrypted && <div className="message-actions">
+                {!selecting && !message.deleted && !message.encrypted && <><button className="touch-message-menu" aria-label="Действия с сообщением" onClick={() => setContext(message)}>···</button><div className="message-actions">
                   <button title="Ответить" aria-label="Ответить" onClick={() => { setReply(message); setEdit(null); }}><Reply size={15}/></button>
                   <button title="Реакция 👍" aria-label="Реакция 👍" onClick={() => { void api.react(room.id, message.id, '👍').catch(e => useStore.getState().setError(e)); }}>👍</button>
                   <button title="Переслать" aria-label="Переслать" onClick={() => setForward([message])}><Forward size={15}/></button>
                   <button title="Ещё действия" aria-label="Ещё действия" onClick={() => setContext(message)}>···</button>
                   {mine && <>{!message.attachment && <button title="Редактировать" aria-label="Редактировать" onClick={() => { setEdit(message); setReply(null); setBody(message.body); }}><Pencil size={14}/></button>}<button title="Удалить" aria-label="Удалить" onClick={() => setDeleting(message)}><Trash2 size={14}/></button></>}
-                </div>}
+                </div></>}
               </article>
               </div>
             </div>;

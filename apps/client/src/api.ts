@@ -3,6 +3,8 @@ import { listen } from '@tauri-apps/api/event';
 import type { SessionInfo, RoomSummary, TimelinePage, Update, EncryptionStatus, ChatFolder, UserSearchResult } from './models';
 
 export const nativeAvailable = () => isTauri();
+export type NotificationTarget = { kind:'room'; roomId:string; sessionKey:string } | { kind:'updates' };
+export interface NotificationActivation { id:string; target:NotificationTarget }
 export const api = {
   updateStatus: () => invoke<import('./UpdatesPanel').UpdateStatus>('update_status'),
   checkUpdate: () => invoke<import('./UpdatesPanel').UpdateStatus>('check_update'),
@@ -40,7 +42,9 @@ export const api = {
   saveFile: (name: string, data: string) => invoke<boolean>('save_download', { name, data }),
   desktop: (autostart?: boolean) => invoke<{ desktop: boolean; autostart: boolean }>('desktop_settings', { autostart: autostart ?? null }),
   minimize: () => invoke<void>('minimize_to_tray'),
-  notify: (title: string, body: string) => invoke<void>('native_notify', { title, body }),
+  notify: (title: string, body: string, target?:NotificationTarget) => invoke<void>('native_notify', { title, body, target:target??null }),
+  pendingNotification: () => invoke<NotificationActivation|null>('pending_notification'),
+  acknowledgeNotification: (id:string) => invoke<void>('acknowledge_notification',{id}),
   openUrl: (url: string) => invoke<void>('open_url', { url }),
   accounts: () => invoke<{ entries: { id: string; userId: string; homeserver: string }[]; active: string | null }>('list_accounts'),
   addAccount: (homeserver: string, username: string, password: string) => invoke<SessionInfo>('add_account', { homeserver, username, password }),
@@ -58,3 +62,4 @@ export function onConnection(callback: (sessionKey: string, error: string) => vo
 }
 
 export const onAppUpdateProgress = (callback:(value:{phase:string;downloaded:number;total:number|null})=>void) => listen('app-update-progress', event=>callback(event.payload as Parameters<typeof callback>[0]));
+export const onNotification = (callback:(value:NotificationActivation)=>void) => listen<NotificationActivation>('notification-open',event=>callback(event.payload));

@@ -1,25 +1,29 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from './store';
-// Fetch available history after an explicit unlock. No read receipts or plaintext disk cache.
+// Restore protected snapshots before network refresh; never mark a chat as read.
 export function RoomPreviews() {
   const session = useStore(s => s.session), encryption = useStore(s => s.encryption), rooms = useStore(s => s.rooms);
+  const connection = useStore(s => s.connection);
   const signature = rooms.filter(room => room.membership === 'joined' && room.encryption === 'encrypted').map(room => room.id).sort().join('|');
   const attempted = useRef(new Set<string>());
-  useEffect(() => { attempted.current = new Set(); }, [session, encryption]);
+  useEffect(() => { attempted.current = new Set(); }, [session, encryption, connection]);
   useEffect(() => {
     if (!session || !encryption.enabled) return;
     let alive = true;
-    const queue = rooms.filter(room => room.membership === 'joined' && room.encryption === 'encrypted' && room.id !== useStore.getState().activeRoom && !attempted.current.has(room.id));
+    const queue = rooms.filter(room => room.membership === 'joined' && room.encryption === 'encrypted' && !attempted.current.has(room.id));
     let index = 0;
     async function worker() {
       while (alive && useStore.getState().session === session && index < queue.length) {
         const room = queue[index++]; attempted.current.add(room.id);
-        try { await useStore.getState().load(room.id); } catch { /* Opening the chat offers the normal error/retry path. */ }
+        try {
+          await useStore.getState().hydrate(room.id);
+          if (alive && connection === 'online' && room.encryption === 'encrypted') await useStore.getState().load(room.id);
+        } catch { /* Opening the chat offers the normal error/retry path. */ }
       }
     }
     void Promise.all([worker(), worker()]);
     return () => { alive = false; };
   // Signature changes only when the relevant set of rooms changes, not on every sync.
-  }, [session, encryption, signature]);
+  }, [session, encryption, signature, connection]);
   return null;
 }

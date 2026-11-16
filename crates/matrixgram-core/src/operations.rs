@@ -24,6 +24,17 @@ use std::time::Duration;
 
 pub const MAX_MEDIA: usize = 25 * 1024 * 1024;
 
+pub(crate) fn media_cache_request(source: &MediaSource) -> Result<MediaRequestParameters> {
+    use sha2::{Digest, Sha256};
+    // SDK keys media by MXC URI alone. Include the full encryption descriptor,
+    // so a changed key/hash cannot reuse already decrypted bytes.
+    let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(source)?));
+    Ok(MediaRequestParameters {
+        source: MediaSource::Plain(format!("mxc://matrixgram.cache/{hash}").into()),
+        format: MediaFormat::File,
+    })
+}
+
 #[derive(Deserialize)]
 #[serde(
     tag = "kind",
@@ -605,6 +616,21 @@ impl Account {
         if !url.is_valid() {
             return Err(CoreError::User("Некорректный адрес медиа".into()));
         }
+        let cache_request = media_cache_request(&source)?;
+        if let Some(bytes) = self
+            .client
+            .media_store()
+            .lock()
+            .await
+            .map_err(network_error)?
+            .get_media_content(&cache_request)
+            .await
+            .map_err(network_error)?
+        {
+            return Ok(MediaData {
+                data: STANDARD.encode(bytes),
+            });
+        }
         let bytes = self
             .client
             .media()
@@ -620,6 +646,18 @@ impl Account {
         if bytes.len() > MAX_MEDIA {
             return Err(CoreError::User("Файл превышает лимит клиента 25 МБ".into()));
         }
+        self.client
+            .media_store()
+            .lock()
+            .await
+            .map_err(network_error)?
+            .add_media_content(
+                &cache_request,
+                bytes.clone(),
+                matrix_sdk::media::store::IgnoreMediaRetentionPolicy::No,
+            )
+            .await
+            .map_err(network_error)?;
         Ok(MediaData {
             data: STANDARD.encode(bytes),
         })

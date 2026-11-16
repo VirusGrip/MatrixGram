@@ -5,7 +5,7 @@ import { useStore } from './store';
 import type { MatrixEvent, SessionInfo } from './models';
 const session:SessionInfo={userId:'@alice:test',deviceId:'TEST',homeserver:'https://matrix.test',persisted:false};
 const event:MatrixEvent={event_id:'$a',sender:'@alice:test',type:'m.room.message',origin_server_ts:1,content:{body:'message'}};
-beforeEach(()=>{useStore.getState().clear();vi.resetAllMocks();useStore.setState({session:{...session}});vi.mocked(api.cached).mockResolvedValue({roomId:'!r:test',events:[],next:null});});
+beforeEach(()=>{useStore.getState().clear();vi.resetAllMocks();useStore.setState({session:{...session},connection:'online'});vi.mocked(api.cached).mockResolvedValue({roomId:'!r:test',events:[],next:null});});
 afterEach(()=>vi.restoreAllMocks());
 it('coalesces foreground and background loads of the same history page',async()=>{
   let finish!:(value: {roomId:string;events:MatrixEvent[];next:null})=>void;
@@ -69,7 +69,31 @@ it('does not share requests or late results between sessions',async()=>{
   let finish!:(value:{roomId:string;events:MatrixEvent[];next:null})=>void;
   vi.mocked(api.history).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve})).mockResolvedValue({roomId:'!r:test',events:[],next:null});
   const old=useStore.getState().load('!r:test');await vi.waitFor(()=>expect(api.history).toHaveBeenCalledTimes(1));
-  useStore.getState().clear();useStore.setState({session:{...session,deviceId:'OTHER'}});
+  useStore.getState().clear();useStore.setState({session:{...session,deviceId:'OTHER'},connection:'online'});
   await useStore.getState().load('!r:test');finish({roomId:'!r:test',events:[event],next:null});await old;
   expect(api.history).toHaveBeenCalledTimes(2);expect(useStore.getState().events['!r:test']).toEqual([]);
+});
+it('restores a cached page and its cursor offline, then refreshes on reconnection',async()=>{
+  useStore.setState({connection:'connecting'});
+  vi.mocked(api.cached).mockResolvedValue({roomId:'!r:test',events:[event],next:'cached-cursor',profiles:[{userId:session.userId,name:'Алиса'}]});
+  await useStore.getState().load('!r:test');
+  expect(api.history).not.toHaveBeenCalled();expect(useStore.getState().cursors['!r:test']).toBe('cached-cursor');
+  useStore.setState({connection:'online'});
+  vi.mocked(api.history).mockResolvedValue({roomId:'!r:test',events:[event],next:'fresh-cursor'});
+  await useStore.getState().load('!r:test');
+  expect(api.history).toHaveBeenCalledTimes(1);expect(api.cached).toHaveBeenCalledTimes(1);
+});
+it('a slow cache restore cannot replace a newer live profile or redacted event',async()=>{
+  let finish!:(value:Awaited<ReturnType<typeof api.cached>>)=>void;
+  vi.mocked(api.cached).mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+  const request=useStore.getState().hydrate('!r:test');
+  useStore.getState().apply(session.userId+'|'+session.deviceId,{rooms:[],timelines:[{roomId:'!r:test',events:[{...event,content:{},unsigned:{redacted_because:{}}}],next:null,profiles:[{userId:session.userId,name:'Новое имя'}],canSend:false}],connection:'online',error:null});
+  finish({roomId:'!r:test',events:[event],next:null,profiles:[{userId:session.userId,name:'Старое имя'}],canSend:true});await request;
+  expect(useStore.getState().profiles['!r:test'][session.userId].name).toBe('Новое имя');
+  expect(useStore.getState().events['!r:test'][0].content).toEqual({});expect(useStore.getState().canSend['!r:test']).toBe(false);
+});
+it('a damaged local cache does not prevent fresh server history',async()=>{
+  vi.mocked(api.cached).mockRejectedValue(new Error('damaged'));
+  vi.mocked(api.history).mockResolvedValue({roomId:'!r:test',events:[event],next:null});
+  await useStore.getState().load('!r:test');expect(useStore.getState().events['!r:test']).toEqual([event]);
 });

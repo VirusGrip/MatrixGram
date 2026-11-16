@@ -18,7 +18,7 @@ export function notifyInvitations(key: string, rooms: RoomSummary[]) {
     for (const room of pending) {
       if (seen.has(room.id)) continue;
       const from = room.inviter ? userTitle(room.inviter.userId, room.inviter.name, names) : null;
-      void api.notify('Приглашение в комнату', `${from ? `${from} приглашает в «` : 'Вас пригласили в «'}${roomTitle(room, names)}»`).catch(() => {});
+      void api.notify('Приглашение в комнату', `${from ? `${from} приглашает в «` : 'Вас пригласили в «'}${roomTitle(room, names)}»`,{kind:'room',roomId:room.id,sessionKey:key}).catch(() => {});
     }
   }
   // Keep outstanding room IDs, not message text. Leaving this set allows a later

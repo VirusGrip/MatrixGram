@@ -17,6 +17,7 @@ thiserror = "2"
 zeroize = "1"
 base64 = "0.22"
 mime = "0.3"
+sha2 = "0.10"
 eyeball = "0.8"
 
 [target.'cfg(windows)'.dependencies]

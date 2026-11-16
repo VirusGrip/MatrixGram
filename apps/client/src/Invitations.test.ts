@@ -10,7 +10,7 @@ beforeEach(()=>{storage.clear();vi.clearAllMocks();vi.stubGlobal('localStorage',
 it('notifies an invitation without timeline messages, once across repeated syncs and reconnect',()=>{
   for(let i=0;i<20;i++)notifyInvitations('@alice:test|ONE',[room]);
   expect(api.notify).toHaveBeenCalledTimes(1);
-  expect(api.notify).toHaveBeenCalledWith('Приглашение в комнату','Мой контакт приглашает в «Рабочая группа»');
+  expect(api.notify).toHaveBeenCalledWith('Приглашение в комнату','Мой контакт приглашает в «Рабочая группа»',{kind:'room',roomId:room.id,sessionKey:'@alice:test|ONE'});
 });
 it('notifies a later re-invitation and isolates account metadata',()=>{
   notifyInvitations('alice|ONE',[room]);notifyInvitations('alice|ONE',[]);notifyInvitations('alice|ONE',[room]);notifyInvitations('carol|TWO',[room]);
