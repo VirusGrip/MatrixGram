@@ -4,7 +4,9 @@ use std::{
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{Emitter, Manager, State};
+#[cfg(desktop)]
+use tauri::Emitter;
+use tauri::{Manager, State};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -74,6 +76,7 @@ fn token(url: &url::Url) -> Option<String> {
     let uuid = uuid::Uuid::parse_str(id).ok()?;
     (uuid.to_string() == id).then(|| id.to_owned())
 }
+#[cfg(desktop)]
 pub fn focus(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -81,6 +84,7 @@ pub fn focus(app: &tauri::AppHandle) {
         let _ = window.set_focus();
     }
 }
+#[cfg(desktop)]
 pub fn activate(app: &tauri::AppHandle, url: &url::Url) {
     let Some(id) = token(url) else { return };
     let state = app.state::<Notifications>();
