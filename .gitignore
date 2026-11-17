@@ -24,3 +24,5 @@ performance-results/
 release-secrets/
 
 /out/
+
+apps/client/src-tauri/windows/generated/

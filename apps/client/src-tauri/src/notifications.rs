@@ -242,7 +242,12 @@ fn windows_toast(
     let xml = XmlDocument::new()?;
     xml.LoadXml(&HSTRING::from(toast_xml(title, body, launch)))?;
     let toast = ToastNotification::CreateToastNotification(&xml)?;
-    ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?.Show(&toast)
+    let notifier = if super::windows_identity::is_packaged()? {
+        ToastNotificationManager::CreateToastNotifier()?
+    } else {
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?
+    };
+    notifier.Show(&toast)
 }
 #[cfg(test)]
 mod tests {

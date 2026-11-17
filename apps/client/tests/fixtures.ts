@@ -62,6 +62,7 @@ export const api = {
  media:async source=>({data:mediaStore[source.url]||pixel}),
  upload:async upload=>{window.__uploads=[...(window.__uploads||[]),{...upload,data:undefined,bytes:atob(upload.data).length}];if(upload.target==='profile')return 'mxc://test/avatar';const id='$upload'+Date.now(),url='mxc://test/'+upload.txn;mediaStore[url]=upload.data;events.push({event_id:id,sender:session.userId,type:'m.room.message',origin_server_ts:Date.now(),content:{msgtype:upload.voice?'m.audio':upload.mime.startsWith('image/')?'m.image':'m.file',body:upload.name,url,info:{mimetype:upload.mime,size:20,duration:upload.durationMs},...(upload.voice?{'org.matrix.msc3245.voice':{}}:{})}});setTimeout(()=>publish(upload.roomId),5);return id;},
  cancelUpload:async()=>{},saveFile:async(name,data)=>{window.__savedFile={name,data};return true},
+ windowsIntegration:async()=>({supported:false,active:false,setupAvailable:false,configured:false}),
  desktop:async autostart=>({desktop:true,autostart:!!autostart}),minimize:async()=>{},notify:async(title,body)=>{window.__notifications=[...(window.__notifications||[]),{title,body}]},openUrl:async url=>{window.__openedUrl=url},
  accounts:async()=>({entries:[],active:null}),addAccount:async()=>session,switchAccount:async()=>session,mediaPermissions:async()=>true,requestNotifications:async()=>true
 };

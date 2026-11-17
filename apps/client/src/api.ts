@@ -6,6 +6,8 @@ export const nativeAvailable = () => isTauri();
 export type NotificationTarget = { kind:'room'; roomId:string; sessionKey:string } | { kind:'updates' };
 export interface NotificationActivation { id:string; target:NotificationTarget }
 export const api = {
+  windowsIntegration: () => invoke<import('./WindowsIntegrationPanel').IntegrationStatus>('windows_integration'),
+  configureWindowsIntegration: () => invoke<import('./WindowsIntegrationPanel').IntegrationStatus>('configure_windows_integration'),
   memoryUsage: () => invoke<import('./MemoryPanel').MemoryReport>('memory_usage'),
   updateStatus: () => invoke<import('./UpdatesPanel').UpdateStatus>('update_status'),
   checkUpdate: () => invoke<import('./UpdatesPanel').UpdateStatus>('check_update'),

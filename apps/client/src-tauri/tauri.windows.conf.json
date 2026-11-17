@@ -1,0 +1,19 @@
+{
+  "bundle": {
+    "resources": {
+      "windows/identity/MatrixGram.identity.msix": "identity/MatrixGram.identity.msix",
+      "windows/identity/publisher.cer": "identity/publisher.cer",
+      "windows/identity/identity.json": "identity/identity.json",
+      "icons/icon.png": "identity/logo.png",
+      "windows/IdentityCommon.ps1": "identity/IdentityCommon.ps1",
+      "windows/RegisterIdentity.ps1": "identity/RegisterIdentity.ps1",
+      "windows/UnregisterIdentity.ps1": "identity/UnregisterIdentity.ps1",
+      "windows/generated/IdentityTrust.exe": "identity/IdentityTrust.exe"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/hooks.nsh"
+      }
+    }
+  }
+}

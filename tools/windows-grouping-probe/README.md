@@ -88,3 +88,9 @@ cargo clippy --manifest-path tools/windows-grouping-probe/Cargo.toml --locked --
 ```
 
 Документированные API: [SetCurrentProcessExplicitAppUserModelID](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-setcurrentprocessexplicitappusermodelid), [AppUserModel.ID](https://learn.microsoft.com/en-us/windows/win32/properties/props-system-appusermodel-id), [SHGetPropertyStoreForWindow](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shgetpropertystoreforwindow). Свойство окна очищается перед уничтожением HWND. Эти API описывают идентификацию и панель задач; влияние на группировку Task Manager проверяется экспериментом.
+
+## Итог package identity, 17 ноября 2026
+
+Пользователь подтвердил группировку при сортировке по памяти сначала на sparse package probe, затем на копии настоящего MatrixGram 0.5.4 с обычным профилем. После удаления временного доверия и замены внешнего exe без перерегистрации пакета группа и профиль сохранились. Все диагностические пакеты, тестовое доверие и приватный ключ удалены. В кандидат 0.5.6 переносится статический identity-компонент с разовой настройкой; [production workflow и ограничения](../../docs/WINDOWS_PROCESS_GROUPING.md).
+
+Флаг msWindowsTaskManager не прошёл проверку настоящего клиента: он скрывал WebView2, но не прибавлял память к группе MatrixGram. В production он не используется. Старые инструкции выше сохранены для воспроизведения диагностических режимов и не означают готовность этих вариантов.

@@ -14,7 +14,9 @@ $packagePath=Join-Path $bundle 'MatrixGramGroupingProbe.identity.msix'
 $exePath=Join-Path $bundle 'external\MatrixGramPackageProbe.exe'
 if ((Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash -ne $facts.PackageSha256 -or (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash -ne $facts.ExecutableSha256) { throw 'Diagnostic package/executable hash mismatch' }
 $trustedPath='Cert:\CurrentUser\TrustedPeople\'+$facts.Thumbprint
-if ((Test-Path -LiteralPath $trustedPath) -or @(Get-AppxPackage -Name $name).Count) { throw 'Test trust/package already exists; refusing to overwrite existing state' }
+# The logical CurrentUser store can expose machine certificates as well.
+# In machine-lease mode that inherited entry is expected and is verified below.
+if ((-not $UseMachineTrust -and (Test-Path -LiteralPath $trustedPath)) -or @(Get-AppxPackage -Name $name).Count) { throw 'Test trust/package already exists; refusing to overwrite existing state' }
 if ($UseMachineTrust) {
     $machinePath='Cert:\LocalMachine\TrustedPeople\'+$facts.Thumbprint
     $leasePath=Join-Path $bundle 'machine-trust-state.json'
