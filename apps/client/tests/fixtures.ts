@@ -19,6 +19,7 @@ const profiles=[{userId:'@alice:test',name:'Alice'},{userId:'@bob:test',name:'Bo
 const pixel='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
 const publish=roomId=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[{roomId,events,next:null}],connection:'online',error:null}));
 export const api = {
+ memoryUsage:async()=>({supported:false,sampledAtMs:Date.now(),totalPrivateBytes:null,unavailable:0,processes:[]}),
  updateStatus:async()=>({currentVersion:'0.5.2',configured:false,platform:'windows',repository:'VirusGrip/MatrixGram',available:null}),
  checkUpdate:async()=>({currentVersion:'0.5.2',configured:true,platform:'windows',repository:'VirusGrip/MatrixGram',available:null}),downloadUpdate:async()=>{},installUpdate:async()=>{window.__updateInstalled=true;return 'started'},
  bootstrap:async()=>null, login:async()=>{setTimeout(()=>updates.forEach(update=>update(session.userId+'|'+session.deviceId,{rooms,timelines:[],connection:'online',error:null})),30);return session}, rooms:async()=>[...rooms], logout:async()=>{}, forget:async()=>{},

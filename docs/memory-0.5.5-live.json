@@ -1,0 +1,91 @@
+{
+  "collectorVersion": "0.5.5",
+  "clientVersion": "0.5.4",
+  "platform": "Windows 11 10.0.26200",
+  "native": {
+    "supported": true,
+    "sampledAtMs": 1794924302237,
+    "totalPrivateBytes": 164995072,
+    "unavailable": 0,
+    "processes": [
+      {
+        "pid": 16536,
+        "name": "matrixgram.exe",
+        "isMain": true,
+        "privateBytes": 34623488
+      },
+      {
+        "pid": 17400,
+        "name": "msedgewebview2.exe",
+        "isMain": false,
+        "privateBytes": 25366528
+      },
+      {
+        "pid": 15116,
+        "name": "msedgewebview2.exe",
+        "isMain": false,
+        "privateBytes": 1286144
+      },
+      {
+        "pid": 9468,
+        "name": "msedgewebview2.exe",
+        "isMain": false,
+        "privateBytes": 36835328
+      },
+      {
+        "pid": 17252,
+        "name": "msedgewebview2.exe",
+        "isMain": false,
+        "privateBytes": 5136384
+      },
+      {
+        "pid": 16884,
+        "name": "msedgewebview2.exe",
+        "isMain": false,
+        "privateBytes": 2719744
+      },
+      {
+        "pid": 16524,
+        "name": "msedgewebview2.exe",
+        "isMain": false,
+        "privateBytes": 59027456
+      }
+    ]
+  },
+  "windowsCounter": {
+    "sampledAt": "2026-11-17T17:05:03.0497738+03:00",
+    "totalPrivateBytes": 164995072,
+    "processes": [
+      {
+        "pid": 16536,
+        "privateBytes": 34623488
+      },
+      {
+        "pid": 17400,
+        "privateBytes": 25366528
+      },
+      {
+        "pid": 15116,
+        "privateBytes": 1286144
+      },
+      {
+        "pid": 9468,
+        "privateBytes": 36835328
+      },
+      {
+        "pid": 17252,
+        "privateBytes": 5136384
+      },
+      {
+        "pid": 16884,
+        "privateBytes": 2719744
+      },
+      {
+        "pid": 16524,
+        "privateBytes": 59027456
+      }
+    ]
+  },
+  "differenceBytes": 0,
+  "note": "Sequential measurements of an already running client; memory changes between samples. This checks native collection, not the installed 0.5.5 UI."
+}

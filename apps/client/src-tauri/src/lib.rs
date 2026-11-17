@@ -9,6 +9,7 @@ use std::{sync::Arc, time::Duration};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::{Mutex, RwLock};
 mod accounts;
+mod memory_usage;
 #[cfg_attr(mobile, allow(dead_code))]
 mod notifications;
 mod update_policy;
@@ -802,6 +803,7 @@ pub fn run() {
         .manage(Backend::default())
         .manage(updates::Updates::default())
         .manage(notifications::Notifications::default())
+        .manage(memory_usage::MemoryMonitor::default())
         .invoke_handler(tauri::generate_handler![
             bootstrap,
             login,
@@ -834,6 +836,7 @@ pub fn run() {
             cancel_upload,
             save_download,
             desktop_settings,
+            memory_usage::memory_usage,
             minimize_to_tray,
             notifications::native_notify,
             notifications::pending_notification,

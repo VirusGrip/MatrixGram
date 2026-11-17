@@ -6,6 +6,7 @@ export const nativeAvailable = () => isTauri();
 export type NotificationTarget = { kind:'room'; roomId:string; sessionKey:string } | { kind:'updates' };
 export interface NotificationActivation { id:string; target:NotificationTarget }
 export const api = {
+  memoryUsage: () => invoke<import('./MemoryPanel').MemoryReport>('memory_usage'),
   updateStatus: () => invoke<import('./UpdatesPanel').UpdateStatus>('update_status'),
   checkUpdate: () => invoke<import('./UpdatesPanel').UpdateStatus>('check_update'),
   downloadUpdate: () => invoke<void>('download_update'),
