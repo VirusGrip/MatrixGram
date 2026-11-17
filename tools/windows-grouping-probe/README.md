@@ -22,7 +22,13 @@
 
 Попытка регистрации unsigned identity-only MSIX в текущем пользовательском контексте была отклонена Windows с **0x80073D2B**: unsigned пакет не может содержать исполняемые активации. Несмотря на отсутствие exe внутри MSIX, `Executable` в манифесте требует доверенной подписи. Повышение прав или изменение Developer Mode не выполнялись.
 
-Создан семидневный тестовый сертификат `CN=MatrixGramGroupingProbe.Test` в **CurrentUser/My**, без экспорта private key. Им подписан пакет размером 3231 байт; CMS-подпись проверена без проверки доверия цепочки. **В TrustedPeople/TrustedRoot сертификат не добавлен, пакет не зарегистрирован.** Для проверки требуется явное разрешение пользователя на временное добавление только этого сертификата в **CurrentUser/TrustedPeople** и регистрацию отдельного тестового пакета. Это доверие издателю тестового MSIX, а не корневому CA; подтверждённого исправления группировки пока нет.
+Создан семидневный тестовый сертификат `CN=MatrixGramGroupingProbe.Test` в **CurrentUser/My**, без экспорта private key. Им подписан пакет размером 3231 байт; CMS-подпись проверена без проверки доверия цепочки. Пользователь разрешил временный **CurrentUser/TrustedPeople** и регистрацию пакета. Этот вариант был выполнен, но Windows отклонила пакет с **0x80073CF0 / 0x800B0109**. Импорт автоматически откатился; отсутствие пакета и обоих TrustedPeople entries подтверждено.
+
+Первоначально выбранная область CurrentUser оказалась недостаточной для службы MSIX. [Специализированная инструкция Microsoft](https://learn.microsoft.com/en-us/windows/msix/package/create-certificate-package-signing) требует **LocalMachine/TrustedPeople**. Такое доверие относится ко всем пользователям машины и требует администратора; согласие на CurrentUser его не покрывает.
+
+Подготовлен, скомпилирован, но **не запущен** отдельный `MachineTrustLease.cs` с `requireAdministrator` manifest. Он допускает ровно public certificate с thumbprint `8F1198B5CF6E58233BD09628DFA8424AE72ED877`, отказывается перезаписывать существующее доверие, добавляет только LocalMachine/TrustedPeople и удаляет сертификат в `finally` после finish-file либо через 10 минут. Он не добавляет CA/TrustedRoot. Для запуска и этого изменения нужно отдельное разрешение и подтверждение UAC. Установка пользовательского пакета и запуск самого probe остаются без повышения прав, чтобы не исказить PID/grouping.
+
+Пока machine helper не запускался; машинное доверие не менялось. Подтверждённого исправления группировки нет.
 
 Подготовленная локальная папка: `D:\ДОМ\MatrixGram-Package-Identity-Test`. В ней — публичный `.cer`, подписанный `.msix`, отдельный exe/иконка, `test-package.json` с хешами, install/remove scripts. Private key в папку не входит. Скрипты проверяют identity, thumbprint и SHA256; установка не перезаписывает существующие trust/package. Очистка удаляет только зарегистрированный этим тестом пакет, его TrustedPeople certificate и личный signing key.
 
@@ -32,7 +38,7 @@
 ./tools/windows-grouping-probe/build-sparse-package.ps1 -Binary <exe> -OutputDirectory <новая-папка>
 ```
 
-Параметры `-Publisher` и `-IdentityName MadFrog.MatrixGram.GroupingProbe.Signed` позволяют собрать signed-кандидат перед подписанием SignTool сертификатом из CurrentUser/My. **После отдельного разрешения** используются `install-sparse-test.ps1 -BundleFolder <папка>` и затем `remove-sparse-test.ps1 -BundleFolder <папка>`. Установка/группировка signed-кандидата ещё не проверены.
+Параметры `-Publisher` и `-IdentityName MadFrog.MatrixGram.GroupingProbe.Signed` позволяют собрать signed-кандидат перед подписанием SignTool сертификатом из CurrentUser/My. **Только после отдельного разрешения на LocalMachine** запускается machine trust helper через UAC, затем обычный `install-sparse-test.ps1 -BundleFolder <папка> -UseMachineTrust`. Для отката — `remove-sparse-test.ps1 -BundleFolder <папка>`; он удаляет пакет, посылает finish-file helper и проверяет удаление машинного сертификата, затем удаляет тестовый private key. Группировка signed-кандидата ещё не проверена.
 
 Источники: [sparse package identity](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps), [unsigned MSIX restrictions](https://learn.microsoft.com/en-us/windows/msix/package/unsigned-package).
 

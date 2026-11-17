@@ -14,6 +14,13 @@ if (Test-Path -LiteralPath $statePath) {
         if ($package.PackageFullName -ne $state.PackageFullName -or $package.Publisher -ne $facts.Subject) { throw 'Package has changed; refusing removal' }
         Remove-AppxPackage -Package $package.PackageFullName -ErrorAction Stop
     }
+    if ($state.MachineTrustLease) {
+        [IO.File]::WriteAllText((Join-Path $bundle 'finish-machine-trust.request'),'test complete')
+        $deadline=(Get-Date).AddSeconds(10)
+        $machinePath='Cert:\LocalMachine\TrustedPeople\'+$facts.Thumbprint
+        while ((Test-Path -LiteralPath $machinePath) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+        if (Test-Path -LiteralPath $machinePath) { throw 'Temporary machine certificate was not removed; check the helper before continuing' }
+    }
     $trusted='Cert:\CurrentUser\TrustedPeople\'+$facts.Thumbprint
     if (Test-Path -LiteralPath $trusted) {
         if ((Get-Item -LiteralPath $trusted).Subject -ne $facts.Subject) { throw 'Unexpected trusted certificate' }
