@@ -1,6 +1,6 @@
 # MatrixGram 0.5.4
 
-Matrix-клиент для Windows 10/11 x64 и Android на Tauri 2, React/TypeScript, Rust Matrix SDK 0.19.1, SQLite и Zustand. Сервер по умолчанию: **https://matrix.mad-frog.ru**. Интерфейс следует присланному примеру Telegram Desktop; действие управления папками называется **ПАПКИ**.
+Matrix-клиент для Windows 10/11 x64 и Android на Tauri 2, React/TypeScript, Rust Matrix SDK 0.19.1, SQLite и Zustand. Интерфейс следует присланному примеру Telegram Desktop; действие управления папками называется **ПАПКИ**.
 
 Это ранняя сборка. Точный статус артефактов и проверок: [PROGRESS.md](PROGRESS.md).
 
