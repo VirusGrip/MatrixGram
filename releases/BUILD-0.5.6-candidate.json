@@ -1,0 +1,22 @@
+{
+  "version": "0.5.6",
+  "createdAt": "2026-11-17T21:10:58.7997148Z",
+  "sourceCommit": "e3e6fec5b181228ff3b2ee96405932186da7ffda",
+  "installerBytes": 15578952,
+  "installerSha256": "1BE0C5318FB4EBC3EC4C3F23E9D307B1C967D51E622CA5EF1DD0279F6DC37E51",
+  "executableSha256": "0C3C0BEE5CBC94CE69B1D9930170ADD02CD222AE12ED4FD17A873607734A16F8",
+  "packagedResources": 8,
+  "tauriNsisMarkerPatchVerified": true,
+  "installedExecutableSha256": "ECCC59D59F9CE400C7674B5ED8716B1D91683E13539949250E4F4EA3C0E845CB",
+  "embeddedIdentityVerified": true,
+  "nativeSetupCodePresent": true,
+  "updaterSignatureVerified": true,
+  "installerExecuted": false,
+  "finalDeviceGroupingVerified": false,
+  "osRestartTested": false,
+  "stage": "local-candidate-not-published",
+  "checksRun": "https://github.com/VirusGrip/MatrixGram/actions/runs/44174786690",
+  "checksPassed": true,
+  "androidBuilt": false,
+  "windows10Tested": false
+}
