@@ -30,8 +30,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     use windows::{
         Win32::{
-            Foundation::HWND,
-            Storage::EnhancedStorage::PKEY_AppUserModel_ID,
+            Foundation::{APPMODEL_ERROR_NO_PACKAGE, ERROR_INSUFFICIENT_BUFFER, HWND},
+            Storage::{
+                EnhancedStorage::PKEY_AppUserModel_ID, Packaging::Appx::GetCurrentPackageFullName,
+            },
             System::{
                 Com::{
                     CoTaskMemFree,
@@ -45,7 +47,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 SetCurrentProcessExplicitAppUserModelID,
             },
         },
-        core::{BSTR, HSTRING},
+        core::{BSTR, HSTRING, PWSTR},
     };
 
     fn process_id() -> Result<Option<String>, Box<dyn std::error::Error>> {
@@ -63,6 +65,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             BSTR::try_from(&value).map(|s| Some(s.to_string()))
         }
+    }
+    fn package_identity() -> Result<Option<String>, Box<dyn std::error::Error>> {
+        let mut length = 0;
+        let result = unsafe { GetCurrentPackageFullName(&mut length, None) };
+        if result == APPMODEL_ERROR_NO_PACKAGE {
+            return Ok(None);
+        }
+        if result != ERROR_INSUFFICIENT_BUFFER || length == 0 || length > 32768 {
+            return Err(format!("Unexpected package identity status: {}", result.0).into());
+        }
+        let mut buffer = vec![0u16; length as usize];
+        unsafe { GetCurrentPackageFullName(&mut length, Some(PWSTR(buffer.as_mut_ptr()))) }.ok()?;
+        let end = buffer
+            .iter()
+            .position(|c| *c == 0)
+            .ok_or("Unterminated package identity")?;
+        Ok(Some(String::from_utf16(&buffer[..end])?))
     }
     struct WindowIdentity(IPropertyStore);
     impl Drop for WindowIdentity {
@@ -121,7 +140,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         unsafe { SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(ID))? };
     }
     let actual_process_id = process_id()?;
-    if (!explicit && actual_process_id.is_some())
+    let package_identity = package_identity()?;
+    if (!explicit && actual_process_id.is_some() && package_identity.is_none())
         || (explicit && actual_process_id.as_deref() != Some(ID))
     {
         return Err("Process identity verification failed".into());
@@ -173,6 +193,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "windowAppUserModelIdBeforeWebview": before, "windowAppUserModelIdAfterWebview": after,
         "wryVersion": "0.57.1", "taoVersion": "0.37.2", "smoke": smoke,
         "diagnosticBrowserArguments": std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").ok(),
+        "packageIdentity": package_identity,
         "taskManagerGroupingVerified": false,
     });
     std::fs::write(&report_path, serde_json::to_vec_pretty(&report)?)?;

@@ -8,11 +8,33 @@
 
 Сначала завершите MatrixGram через меню «Выход». Если клиент уже работает, launcher только покажет пояснение и ничего не запустит: single-instance передал бы управление старому окружению WebView2 без флага, и тест был бы недостоверным. Учётная запись, профиль, база данных и установленный exe используются обычные; дополнительных настроек в них launcher не пишет. Следующий обычный запуск ярлыком не получает флаг.
 
-Это исследование, не готовое исправление и не проверенный режим для выпуска. Результат группировки вручную пока ожидается. Исходники launcher находятся в `MatrixGramGroupingLauncher.cs`; C# compiler входит в .NET Framework Windows. Сборка:
+**Результат: вариант отклонён.** Пользователь подтвердил исчезновение отдельной строки «Диспетчер WebView2», но группа MatrixGram продолжила показывать около 40 МБ. Независимый замер дал 7 процессов, 164,61 МиБ всего и 37,48 МиБ основного процесса. Флаг не подтвердил требуемую агрегацию. В приложение и обновления он не перенесён. Следующий обычный запуск установленным ярлыком возвращает стандартное окружение.
+
+Исходники launcher сохранены для воспроизведения в `MatrixGramGroupingLauncher.cs`; C# compiler входит в .NET Framework Windows. Сборка:
 
 ```powershell
 ./tools/windows-grouping-probe/build-launcher.ps1 -OutputDirectory <папка-диагностики>
 ```
+
+## Package identity — подготовлено, требуется отдельное разрешение
+
+Подготовлен следующий изолированный эксперимент: sparse MSIX с `runFullTrust` / `unvirtualizedResources`, отдельным диагностическим exe и встроенной идентичностью пакета. Реальный клиент, его аккаунты и база данных не используются. Native report проверяет `GetCurrentPackageFullName`, поэтому наличие identity не будет выводиться только из факта регистрации.
+
+Попытка регистрации unsigned identity-only MSIX в текущем пользовательском контексте была отклонена Windows с **0x80073D2B**: unsigned пакет не может содержать исполняемые активации. Несмотря на отсутствие exe внутри MSIX, `Executable` в манифесте требует доверенной подписи. Повышение прав или изменение Developer Mode не выполнялись.
+
+Создан семидневный тестовый сертификат `CN=MatrixGramGroupingProbe.Test` в **CurrentUser/My**, без экспорта private key. Им подписан пакет размером 3231 байт; CMS-подпись проверена без проверки доверия цепочки. **В TrustedPeople/TrustedRoot сертификат не добавлен, пакет не зарегистрирован.** Для проверки требуется явное разрешение пользователя на временное добавление только этого сертификата в **CurrentUser/TrustedPeople** и регистрацию отдельного тестового пакета. Это доверие издателю тестового MSIX, а не корневому CA; подтверждённого исправления группировки пока нет.
+
+Подготовленная локальная папка: `D:\ДОМ\MatrixGram-Package-Identity-Test`. В ней — публичный `.cer`, подписанный `.msix`, отдельный exe/иконка, `test-package.json` с хешами, install/remove scripts. Private key в папку не входит. Скрипты проверяют identity, thumbprint и SHA256; установка не перезаписывает существующие trust/package. Очистка удаляет только зарегистрированный этим тестом пакет, его TrustedPeople certificate и личный signing key.
+
+Сборка unsigned варианта (нужны полноценные SDK BuildTools MakeAppx/MT в PATH):
+
+```powershell
+./tools/windows-grouping-probe/build-sparse-package.ps1 -Binary <exe> -OutputDirectory <новая-папка>
+```
+
+Параметры `-Publisher` и `-IdentityName MadFrog.MatrixGram.GroupingProbe.Signed` позволяют собрать signed-кандидат перед подписанием SignTool сертификатом из CurrentUser/My. **После отдельного разрешения** используются `install-sparse-test.ps1 -BundleFolder <папка>` и затем `remove-sparse-test.ps1 -BundleFolder <папка>`. Установка/группировка signed-кандидата ещё не проверены.
+
+Источники: [sparse package identity](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps), [unsigned MSIX restrictions](https://learn.microsoft.com/en-us/windows/msix/package/unsigned-package).
 
 ## Изолированные варианты
 
