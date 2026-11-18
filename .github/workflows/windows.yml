@@ -44,6 +44,8 @@ jobs:
           path: apps/client/test-results/
           if-no-files-found: warn
       - run: cargo test --workspace --locked cache_load_100000_events -- --ignored --nocapture
+      - name: Transfer an actual encrypted 500 MiB file over loopback
+        run: cargo test -p matrixgram-core --locked large_file_maximum_streaming_load -- --ignored --nocapture
       - run: npm run test:load
       - uses: actions/upload-artifact@v4
         if: always()

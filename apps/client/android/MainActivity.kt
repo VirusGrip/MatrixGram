@@ -20,10 +20,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.annotation.Keep
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.security.KeyStore
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -31,7 +34,11 @@ import javax.crypto.spec.GCMParameterSpec
 
 @Keep
 class MainActivity : TauriActivity() {
-  companion object { private val vaultLock = Any() }
+  companion object {
+    private val vaultLock = Any()
+    private val createdDownloads = ConcurrentHashMap<String, Uri>()
+    private val sharedInputs = ConcurrentHashMap<String, Uri>()
+  }
   private val permissionLock = Any()
   private val fileDialogLock = Any()
   private var browser: WebView? = null
@@ -170,6 +177,49 @@ class MainActivity : TauriActivity() {
     saved
   }
 
+  // Large files stay in Rust streams. Only an owned descriptor crosses JNI.
+  fun createLargeDownload(name: String): String = synchronized(fileDialogLock) {
+    val result = CompletableFuture<String>()
+    val safeName = name.replace('\\', '/').substringAfterLast('/').take(255).ifBlank { "download.bin" }
+    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(safeName.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
+    runOnUiThread {
+      launchActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+        addCategory(Intent.CATEGORY_OPENABLE); type = mime; putExtra(Intent.EXTRA_TITLE, safeName)
+      }) { selection ->
+        val uri = selection?.data?.data
+        if (selection?.resultCode != RESULT_OK || uri == null) result.complete("")
+        else Thread {
+          try {
+            val descriptor = contentResolver.openFileDescriptor(uri, "w") ?: error("Output is unavailable")
+            val id = java.util.UUID.randomUUID().toString()
+            val fd = descriptor.detachFd(); descriptor.close()
+            createdDownloads[id] = uri
+            if (!result.complete(JSONObject().put("id", id).put("fd", fd).toString())) {
+              ParcelFileDescriptor.adoptFd(fd).close(); finishLargeDownload(id, false)
+            }
+          } catch (error: Exception) {
+            runCatching { DocumentsContract.deleteDocument(contentResolver, uri) }
+            result.completeExceptionally(error)
+          }
+        }.start()
+      }
+    }
+    try { result.get(120, TimeUnit.SECONDS) }
+    catch (error: Exception) { result.cancel(true); throw error }
+  }
+
+  fun finishLargeDownload(id: String, success: Boolean) {
+    val uri = createdDownloads.remove(id) ?: return
+    if (!success) runCatching { DocumentsContract.deleteDocument(contentResolver, uri) }
+  }
+
+  fun openSharedFile(handle: String): Int {
+    val uri = sharedInputs[handle] ?: error("Shared file is unavailable")
+    require(uri.scheme == "content")
+    val descriptor = contentResolver.openFileDescriptor(uri, "r") ?: error("Shared file cannot be opened")
+    return descriptor.detachFd().also { descriptor.close() }
+  }
+  fun releaseSharedFile(handle: String) { sharedInputs.remove(handle) }
   @Suppress("DEPRECATION")
   private fun receiveShare(intent: Intent?) {
     if (intent?.action != Intent.ACTION_SEND && intent?.action != Intent.ACTION_SEND_MULTIPLE) return
@@ -179,38 +229,47 @@ class MainActivity : TauriActivity() {
     Thread {
       try {
         val files = JSONArray()
-        var total = 0
-        for (uri in uris.take(10)) {
-          require(uri.scheme == "content")
-          var name = "shared-file"
-          contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor -> if (cursor.moveToFirst()) name = cursor.getString(0) ?: name }
-          val bytes = ByteArrayOutputStream()
-          contentResolver.openInputStream(uri)?.use { input ->
-            val buffer = ByteArray(8192)
-            while (true) {
-              val count = input.read(buffer)
-              if (count < 0) break
-              total += count
-              require(total <= 25 * 1024 * 1024)
-              bytes.write(buffer, 0, count)
+        val registered = mutableListOf<String>()
+        try {
+          for (uri in uris.take(10)) {
+            require(uri.scheme == "content")
+            require(sharedInputs.size < 100) { "Too many shared files" }
+            var name = "shared-file"
+            var size: Long? = null
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+              if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (nameIndex >= 0) name = cursor.getString(nameIndex) ?: name
+                if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex).takeIf { it >= 0 }
+              }
             }
-          } ?: throw IllegalStateException("File is unavailable")
-          files.put(JSONObject().put("name", name.take(255)).put("mime", contentResolver.getType(uri) ?: "application/octet-stream").put("data", Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP)))
-        }
+            require(size == null || size!! <= 524288000L) { "File exceeds 500 MiB" }
+            val handle = java.util.UUID.randomUUID().toString()
+            sharedInputs[handle] = uri; registered.add(handle)
+            files.put(JSONObject().put("nativeHandle", handle).put("name", name.take(255)).put("mime", contentResolver.getType(uri) ?: "application/octet-stream").put("size", size ?: JSONObject.NULL))
+          }
+        } catch (error: Exception) { registered.forEach { sharedInputs.remove(it) }; throw error }
         val payload = JSONObject().put("files", files).put("text", text ?: "")
         deliverShare(payload, 0)
       } catch (_: Exception) {
-        main.post { Toast.makeText(this, "Не удалось получить файл. Общий размер — до 25 МБ.", Toast.LENGTH_LONG).show() }
+        main.post { Toast.makeText(this, "Не удалось получить файл. Размер каждого файла — до 500 МБ.", Toast.LENGTH_LONG).show() }
       }
     }.start()
   }
 
   private fun deliverShare(payload: JSONObject, attempt: Int) {
+    fun retryOrRelease() {
+      if (attempt < 60) main.postDelayed({ deliverShare(payload, attempt + 1) }, 500)
+      else payload.optJSONArray("files")?.let { files ->
+        for (index in 0 until files.length()) releaseSharedFile(files.optJSONObject(index)?.optString("nativeHandle") ?: "")
+      }
+    }
     main.post {
       browser?.evaluateJavascript("Boolean(window.matrixgramShareReady)") { ready ->
         if (ready == "true") browser?.evaluateJavascript("window.dispatchEvent(new CustomEvent('matrixgram-share', {detail: $payload}))", null)
-        else if (attempt < 60) main.postDelayed({ deliverShare(payload, attempt + 1) }, 500)
-      } ?: if (attempt < 60) main.postDelayed({ deliverShare(payload, attempt + 1) }, 500) else Unit
+        else retryOrRelease()
+      } ?: retryOrRelease()
     }
   }
 }

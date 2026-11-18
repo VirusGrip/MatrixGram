@@ -40,6 +40,13 @@ export const api = {
   openDirect: (userId: string) => invoke<string>('open_direct', { userId }),
   op: <T = unknown>(kind: string, args: Record<string, unknown> = {}) => invoke<T>('client_operation', { operation: { kind, ...args } }),
   media: (source: Record<string, unknown>) => invoke<{ data: string }>('fetch_media', { source }),
+  fileTransferLimits: () => invoke<{clientBytes:number;serverBytes:number;effectiveBytes:number}>('file_transfer_limits'),
+  beginFileUpload: (upload:Record<string,unknown>,sessionKey:string) => invoke<void>('begin_file_upload',{upload,sessionKey}),
+  fileUploadChunk: (txn:string,offset:number,bytes:ArrayBuffer) => invoke<void>('file_upload_chunk',bytes,{headers:{'x-matrixgram-transfer':txn,'x-matrixgram-offset':String(offset)}}),
+  finishFileUpload: (txn:string) => invoke<string>('finish_file_upload',{txn}),
+  uploadSharedFile: (upload:Record<string,unknown>,sessionKey:string,handle:string) => invoke<string>('upload_shared_file',{upload,sessionKey,handle}),
+  releaseSharedFile: (handle:string) => invoke<void>('release_shared_file',{handle}),
+  downloadFile: (name:string,source:Record<string,unknown>,txn:string,sessionKey:string) => invoke<boolean>('download_file',{name,source,txn,sessionKey}),
   upload: (upload: Record<string, unknown>) => { const { sessionKey, ...payload } = upload; return invoke<string>('upload_file', { upload: payload, sessionKey: sessionKey ?? null }); },
   cancelUpload: (txn: string) => invoke<void>('cancel_upload', { txn }),
   saveFile: (name: string, data: string) => invoke<boolean>('save_download', { name, data }),
@@ -55,7 +62,7 @@ export const api = {
   mediaPermissions: (video: boolean) => invoke<boolean>('media_permissions', { video }),
   requestNotifications: () => invoke<boolean>('request_notifications'),
 };
-export const onTransfer = (callback: (transfer: { txn: string; current: number; total: number; sessionKey: string }) => void) => listen('matrix-transfer', event => callback(event.payload as Parameters<typeof callback>[0]));
+export const onTransfer = (callback: (transfer: { txn: string; current: number; total: number; sessionKey: string; phase?:string }) => void) => listen('matrix-transfer', event => callback(event.payload as Parameters<typeof callback>[0]));
 
 export function onUpdate(callback: (sessionKey: string, update: Update) => void) {
   return listen<{ sessionKey: string; update: Update }>('matrix-update', ({ payload }) => callback(payload.sessionKey, payload.update));
