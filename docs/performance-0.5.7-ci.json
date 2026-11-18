@@ -1,0 +1,43 @@
+{
+  "version": "0.5.7",
+  "checksWorkflow": "https://github.com/VirusGrip/MatrixGram/actions/runs/44269169578",
+  "runtimeSourceTag": "v0.5.7",
+  "workflowSourceCommit": "9dbbef7c4ba96b41158e18a5689d58d976be4379",
+  "browser": {
+    "rooms": 5000,
+    "seedEvents": 60000,
+    "burstCount": 40,
+    "cpuThrottle": 4,
+    "startupMs": 3306.0999999999767,
+    "searchMs": 165.69999999995343,
+    "syncMedianMs": 100.19999999995343,
+    "syncP95Ms": 117.29999999993015,
+    "syncMaxMs": 132.90000000002328,
+    "heapBeforeBytes": 30012620,
+    "heapAfterBytes": 30736444,
+    "longTaskCount": 58,
+    "longTaskMaxMs": 733,
+    "browser": "chromium",
+    "fixture": "local IPC; Vite development build; not Synapse or native WebView2"
+  },
+  "native": {
+    "LARGE_FILE_LOAD_JSON": {
+      "bytes": 524288000,
+      "elapsedMs": 125044,
+      "encrypted": true,
+      "fixture": "streaming loopback, SDK attachment cipher, actual 500 MiB; no real homeserver upload",
+      "ioChunkBytes": 262144,
+      "ipcChunkBytes": 1048576,
+      "uploadAndDownloadVerified": true
+    },
+    "LOAD_CACHE_JSON": {
+      "events": 100000,
+      "preview1000Ms": 17,
+      "profile": "cargo test dev; local SQLite, no Matrix network",
+      "read100000Ms": 703,
+      "rooms": 200,
+      "writeMs": 4089
+    }
+  },
+  "limitations": "Loopback file I/O and browser IPC fixtures; not live Matrix throughput, installed app memory or a phone."
+}
