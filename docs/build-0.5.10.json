@@ -1,0 +1,117 @@
+{
+  "version": "0.5.10",
+  "releaseUrl": "https://github.com/VirusGrip/MatrixGram/releases/tag/v0.5.10",
+  "publishedAt": "2026-11-18T15:22:22Z",
+  "sourceCommit": "abdba5fb7a5174a9a0db17fc6f0c143073b5f2c4",
+  "workflowCommit": "abdba5fb7a5174a9a0db17fc6f0c143073b5f2c4",
+  "ciBootstrapCommit": "2b7060b9cc35037ede1f08537c6db8860405daae",
+  "workflowRuntimeSourcesEqualTag": true,
+  "releaseWorkflow": "https://github.com/VirusGrip/MatrixGram/actions/runs/44331961336",
+  "checksWorkflow": "https://github.com/VirusGrip/MatrixGram/actions/runs/44331911132",
+  "ciNsisBootstrapCommit": "2b7060b9cc35037ede1f08537c6db8860405daae",
+  "runtimeSourcesMatchCheckedTag": true,
+  "appTagMoved": false,
+  "artifacts": [
+    {
+      "name": "MatrixGram_0.5.10_x64-setup.exe",
+      "bytes": 15763025,
+      "sha256": "44aa8e8a335edfe711d9838d43469fa76ce25c2cf85c2f6a3248707bdadd5765"
+    },
+    {
+      "name": "MatrixGram-0.5.10-android-arm64.apk",
+      "bytes": 53703636,
+      "sha256": "019b57bf4932c8b8c0e0b3680dd166fa83b431e4eb986f8f5bdaef6d2f488592"
+    },
+    {
+      "name": "MatrixGram-source-0.5.10.zip",
+      "bytes": 693421,
+      "sha256": "30bf1bd15ff7c040c586f22b97421a88c2205699ef38bc2cb42232d9e9a4648d"
+    }
+  ],
+  "verified": [
+    "release checksums",
+    "minisign and signed versions",
+    "source ZIP CRC/config/no signing secrets",
+    "APK CRC/arm64/JNI/TLS/update provider",
+    "original Android certificate",
+    "manifest permissions/version",
+    "anonymous latest manifest endpoint",
+    "Windows payload/version/eight identity resources/helper publisher/PE package identity"
+  ],
+  "fileTransfers": {
+    "clientLimitBytes": 524288000,
+    "serverObservedUploadLimitBytes": 524288000,
+    "serverModified": false,
+    "nativeLoopback500MiBTest": "passed",
+    "liveHomeserverLargeTransferTested": false
+  },
+  "windows": {
+    "architecture": "x64",
+    "updaterSignatureVerified": true,
+    "authenticodeSigned": false,
+    "publishedInstallerExecuted": false,
+    "crossVersionUpdateTested": false,
+    "windows10Tested": false,
+    "osRestartTested": false,
+    "publishedPayloadVerified": true,
+    "packagedResourcesVerified": 8,
+    "helperPublisherVerified": true,
+    "embeddedIdentityVerified": true,
+    "packagedExeSha256": "3d03a5937d5bc6e1831fd47c5717e14610a2b591a3aa79fc8969e049a12086cd"
+  },
+  "android": {
+    "abi": "arm64-v8a",
+    "minSdk": 26,
+    "targetSdk": 36,
+    "versionCode": 5010,
+    "buildProfile": "release",
+    "apkV2SignatureVerified": true,
+    "certificateSha256": "eb07a7521e27b424fc303b88b4eb5a2bb29697e7cb1a5ac17da2e2f24b3a5e87",
+    "runtimeTested": false,
+    "crossVersionUpdateTested": false,
+    "safAndShareOnPhoneTested": false
+  },
+  "checks": {
+    "rustCore": 50,
+    "rustApp": 16,
+    "frontendUnit": 43,
+    "browser": 78,
+    "releaseTools": 2,
+    "loadBrowserScenarios": 2,
+    "loadSqliteScenarios": 1,
+    "loadFile500MiBScenarios": 1,
+    "fmt": "passed",
+    "clippy": "passed",
+    "policy": "passed",
+    "ci": "passed",
+    "localTargetedBrowserScenarios": 2,
+    "localExistingLayoutScenarios": 1,
+    "localRustSuiteRepeated": false,
+    "localLoadSuiteRepeated": false
+  },
+  "sourceArchive": {
+    "name": "MatrixGram-source-0.5.10.zip",
+    "sha256": "30bf1bd15ff7c040c586f22b97421a88c2205699ef38bc2cb42232d9e9a4648d",
+    "bytes": 693421,
+    "zipCrcVerified": true
+  },
+  "publishedArtifactsExecuted": false,
+  "conversationLayout": {
+    "encryptionSubtitleRemovedFromHeader": true,
+    "topRightChatMenu": true,
+    "mobileDirectSideAvatarsRemoved": true,
+    "mobileGroupPeerAvatarsPreserved": true,
+    "desktopAvatarsPreserved": true,
+    "mobileRoundedComposer": true,
+    "mobileMessageMenu": "long press, 450 ms; movement/scroll cancels; short tap does not open",
+    "perMessageEllipsisRemoved": true,
+    "selectionGeometryVerified": true,
+    "browserFixtureWidths": [
+      320,
+      390,
+      1280
+    ],
+    "physicalAndroidTested": false,
+    "installedWindowsTested": false
+  }
+}
