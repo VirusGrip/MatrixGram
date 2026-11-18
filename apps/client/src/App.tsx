@@ -64,7 +64,7 @@ function Login({ loading }: { loading: boolean }) {
       <p className="login-note"><KeyRound size={17}/>Зашифрованные комнаты можно открыть после входа.<br/>Восстановление ключей необязательно.</p>
       {!loading && nativeAvailable() && <Accounts savedOnly/>}
     </section>
-    <footer>MatrixGram · 0.5.5 · ранняя версия</footer>
+    <footer>MatrixGram · 0.5.6 · ранняя версия</footer>
   </main>;
 }
 

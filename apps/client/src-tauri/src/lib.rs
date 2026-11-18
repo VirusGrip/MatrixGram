@@ -14,6 +14,9 @@ mod memory_usage;
 mod notifications;
 mod update_policy;
 mod updates;
+#[cfg(windows)]
+mod windows_identity;
+mod windows_integration;
 
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
@@ -837,6 +840,8 @@ pub fn run() {
             save_download,
             desktop_settings,
             memory_usage::memory_usage,
+            windows_integration::windows_integration,
+            windows_integration::configure_windows_integration,
             minimize_to_tray,
             notifications::native_notify,
             notifications::pending_notification,

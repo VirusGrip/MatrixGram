@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "packageName": "MadFrog.MatrixGram",
+  "publisher": "CN=MatrixGram",
+  "applicationId": "MatrixGram",
+  "identityVersion": "1.0.0.0",
+  "certificateThumbprint": "8B05233DBF3D6387CB043B4EDC18906ADC510257",
+  "certificateSha256": "A6ADD370169C2E08DC6601F52AD24CAAFD7407A13728E26A2754E1EA5175C2DE",
+  "packageSha256": "9EFABF9A5CFBA4880FADDFF69B552CCD9A15F8B797D03BE2C341027FFD3DD313",
+  "certificateNotAfter": "2036-11-17T20:17:52.0000000Z",
+  "timestamped": true,
+  "privateKeyRetained": false
+}

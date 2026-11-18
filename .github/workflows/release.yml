@@ -43,6 +43,13 @@ jobs:
       - run: npm test
       - run: node --test scripts/release-manifest.test.mjs scripts/release-version.test.mjs
       - run: npm run check:policy
+      - name: Check Windows identity and installer update hooks
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\NSIS\makensis.exe") -and -not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
+          }
+          ./scripts/test-windows-integration.ps1
       - name: Build and sign Windows update
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
