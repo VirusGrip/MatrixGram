@@ -76,7 +76,7 @@ export const onConnection=async()=>()=>{};
 `;
 
 export async function login(page: Page, adapter = fixtureApi) {
-  await page.route('**/src/api.ts', route => route.fulfill({ contentType: 'text/javascript', body: adapter }));
+  await page.route(/\/src\/api\.ts(?:\?.*)?$/, route => route.fulfill({ contentType: 'text/javascript', body: adapter }));
   await page.goto('/');
   await page.getByLabel('Логин или Matrix ID').fill('alice');
   await page.getByLabel('Пароль', { exact: true }).fill('test-password');

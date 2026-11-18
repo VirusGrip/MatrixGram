@@ -37,6 +37,12 @@ jobs:
           ./scripts/test-windows-integration.ps1
       - run: npm exec -w @matrixgram/client -- playwright install chromium
       - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: MatrixGram-browser-failure
+          path: apps/client/test-results/
+          if-no-files-found: warn
       - run: cargo test --workspace --locked cache_load_100000_events -- --ignored --nocapture
       - run: npm run test:load
       - uses: actions/upload-artifact@v4

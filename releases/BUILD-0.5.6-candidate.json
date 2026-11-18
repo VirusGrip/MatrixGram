@@ -11,12 +11,26 @@
   "embeddedIdentityVerified": true,
   "nativeSetupCodePresent": true,
   "updaterSignatureVerified": true,
-  "installerExecuted": false,
-  "finalDeviceGroupingVerified": false,
+  "installerExecuted": true,
+  "finalDeviceGroupingVerified": true,
   "osRestartTested": false,
   "stage": "local-candidate-not-published",
   "checksRun": "https://github.com/VirusGrip/MatrixGram/actions/runs/44174786690",
   "checksPassed": true,
   "androidBuilt": false,
-  "windows10Tested": false
+  "windows10Tested": false,
+  "manualValidation": {
+    "date": "2026-11-18",
+    "reportedBy": "user",
+    "platform": "Windows 11",
+    "groupingByMemory": true,
+    "profilePreserved": true,
+    "testNotificationReceived": true,
+    "notificationClickOpenedApp": true,
+    "installedPayloadMatches": true,
+    "packageStatus": "Ok",
+    "temporaryCertificateTrustRemoved": true,
+    "privateKeyAbsent": true,
+    "updaterTransitionTested": false
+  }
 }
