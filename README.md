@@ -1,4 +1,4 @@
-# MatrixGram 0.5.7
+# MatrixGram 0.5.8
 
 Matrix-клиент для Windows 10/11 x64 и Android на Tauri 2, React/TypeScript, Rust Matrix SDK 0.19.1, SQLite и Zustand. Интерфейс следует присланному примеру Telegram Desktop; действие управления папками называется **ПАПКИ**.
 

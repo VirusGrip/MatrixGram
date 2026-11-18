@@ -43,7 +43,7 @@ test.describe('touch message actions',()=>{
     await login(page);await page.getByRole('button',{name:'Открыть Команда Matrix',exact:true}).click();
     await expect(page.getByRole('button',{name:'Реакция 👍',exact:true})).toBeHidden();
     await page.getByRole('button',{name:'Действия с сообщением',exact:true}).click();
-    await expect(page.getByRole('button',{name:'Выделить сообщение',exact:true})).toBeVisible();
+    await expect(page.getByRole('menuitem',{name:'Выделить сообщение',exact:true})).toBeVisible();
     await expect(page.locator('.message-menu')).toBeVisible();
   });
 });

@@ -278,7 +278,7 @@ test('member list, profile, pin, forward and room settings call the real IPC con
   await page.getByRole('dialog').getByRole('button', { name: 'Закрыть', exact: true }).click();
   await page.getByRole('button', { name: 'Скрыть информацию' }).click();
   await page.locator('.bubble').first().click({ button: 'right' });
-  await page.getByRole('dialog').getByRole('button', { name: 'Закрепить', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Закрепить', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.locator('.bubble').first().hover(); await page.getByRole('button', { name: 'Переслать', exact: true }).first().click();
   await page.getByRole('dialog').getByRole('button', { name: 'Команда Matrix', exact: true }).click();
@@ -528,7 +528,7 @@ test('chat can be pinned from its context menu and pinned filter persists', asyn
 
 test('selected messages forward together in chronological order', async ({ page }) => {
   await login(page,withMessages([['@bob:test','Первое'],['@alice:test','Второе'],['@bob:test','Третье']]));await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
-  await page.locator('.bubble').nth(2).click({button:'right'});await page.getByRole('button',{name:'Выделить сообщение',exact:true}).click();
+  await page.locator('.bubble').nth(2).click({button:'right'});await page.getByRole('menuitem',{name:'Выделить сообщение',exact:true}).click();
   await page.getByLabel('Выбрать: Первое', {exact:true}).check();
   await expect(page.getByRole('toolbar',{name:'Выбранные сообщения'})).toContainText('Выбрано: 2');
   await page.getByRole('button',{name:'Переслать выбранные',exact:true}).click();
@@ -540,7 +540,7 @@ test('selected messages forward together in chronological order', async ({ page 
 test('partial batch retry skips delivered messages and reuses the failed transaction ID', async ({ page }) => {
   const adapter=withMessages([['@bob:test','Первое'],['@bob:test','Второе'],['@bob:test','Третье']]).replace("if(kind==='roomDetails')",`if(kind==='forward'&&args.eventId==='$visual1'&&!window.__failedForward){window.__failedForward=true;throw new Error('Нет сети')}if(kind==='roomDetails')`);
   await login(page,adapter);await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
-  await expect(page.locator('.bubble')).toHaveCount(3);await page.locator('.bubble').first().getByText('Первое',{exact:true}).click({button:'right',timeout:5000});await page.getByRole('button',{name:'Выделить сообщение',exact:true}).click();
+  await expect(page.locator('.bubble')).toHaveCount(3);await page.locator('.bubble').first().getByText('Первое',{exact:true}).click({button:'right',timeout:5000});await page.getByRole('menuitem',{name:'Выделить сообщение',exact:true}).click();
   await page.getByRole('button',{name:'Выделить загруженные',exact:true}).click();await page.getByRole('button',{name:'Переслать выбранные',exact:true}).click();
   await page.getByRole('dialog').getByRole('button',{name:'Команда Matrix',exact:true}).click();await expect(page.getByRole('alert')).toContainText('Повтор продолжит');
   await page.getByRole('button',{name:'Продолжить пересылку в Команда Matrix',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
