@@ -36,13 +36,13 @@ impl Read for ChunkReader {
                     "cancelled",
                 ));
             }
-            if let Some(chunk) = &self.current {
-                if self.offset < chunk.bytes.len() {
-                    let count = buffer.len().min(chunk.bytes.len() - self.offset);
-                    buffer[..count].copy_from_slice(&chunk.bytes[self.offset..self.offset + count]);
-                    self.offset += count;
-                    return Ok(count);
-                }
+            if let Some(chunk) = &self.current
+                && self.offset < chunk.bytes.len()
+            {
+                let count = buffer.len().min(chunk.bytes.len() - self.offset);
+                buffer[..count].copy_from_slice(&chunk.bytes[self.offset..self.offset + count]);
+                self.offset += count;
+                return Ok(count);
             }
             if let Some(chunk) = self.current.take() {
                 let _ = chunk.acknowledgement.send(());
@@ -179,7 +179,7 @@ pub async fn begin_file_upload(
         let folder=directory(&app)?;
         let mut all=stages.stages.lock().await;
         // Cancelled readers finish within 200 ms and delete their encrypted spool.
-        let mut remove=Vec::new();for (id,stage) in all.iter(){if let Ok(guard)=stage.try_lock(){if guard.token.is_cancelled(){remove.push(id.clone());}}}
+        let mut remove=Vec::new();for (id,stage) in all.iter(){if let Ok(guard)=stage.try_lock() && guard.token.is_cancelled(){remove.push(id.clone());}}
         for id in remove{all.remove(&id);}
         if all.len()>=4{return Err("Дождитесь подготовки других файлов".into());}
         let (sender,receiver)=mpsc::sync_channel(1);let (finished,result)=oneshot::channel();
