@@ -96,10 +96,26 @@ pub struct FileUpload {
     pub mime: String,
     pub txn: String,
     pub size: u64,
+    #[serde(default)]
+    pub caption: Option<String>,
+    #[serde(default)]
+    pub reply_to: Option<String>,
 }
 impl FileUpload {
     pub fn validate(&self) -> Result<()> {
         check_size(self.size)?;
+        if let Some(caption) = self
+            .caption
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            crate::policy::validate_body(caption)?;
+        }
+        if let Some(reply) = self.reply_to.as_deref() {
+            matrix_sdk::ruma::EventId::parse(reply)
+                .map_err(|_| CoreError::User("Некорректный ответ на сообщение".into()))?;
+        }
+
         if self.name.is_empty()
             || self.name.chars().count() > 255
             || self.name.contains(['\0', '\r', '\n'])
@@ -282,7 +298,10 @@ impl Account {
                 _ => "m.file",
             }
         };
-        let mut content = json!({"msgtype":kind,"body":upload.name,"filename":upload.name,"info":{"mimetype":upload.mime,"size":upload.size},"m.mentions":{}});
+        let mut content = json!({"msgtype":kind,"body":upload.caption.as_deref().filter(|value| !value.trim().is_empty()).unwrap_or(&upload.name),"filename":upload.name,"info":{"mimetype":upload.mime,"size":upload.size},"m.mentions":{}});
+        if let Some(reply) = upload.reply_to {
+            content["m.relates_to"] = json!({"m.in_reply_to":{"event_id":reply}});
+        }
         if encrypted {
             let mut file = serde_json::to_value(&prepared.info)?;
             file["url"] = json!(uri);

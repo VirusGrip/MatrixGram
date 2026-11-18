@@ -28,7 +28,7 @@ export interface Message {
   formattedBody?: string;
   attachment?: Attachment;
 }
-export interface Attachment { kind: string; name: string; mime: string; size?: number; source: Record<string, unknown>; duration?: number; voice?: boolean }
+export interface Attachment { caption?: string; kind: string; name: string; mime: string; size?: number; source: Record<string, unknown>; duration?: number; voice?: boolean }
 export interface Member { userId: string; name: string; avatarUrl?: string; power: number; membership: string }
 export interface RoomDetails { members: Member[]; pinned: string[]; myPower: number; canSend: boolean; name?: string; topic?: string; encrypted: boolean; notificationMode?: string }
 export interface Profile { ignored?: boolean; userId: string; displayName?: string; avatarUrl?: string }

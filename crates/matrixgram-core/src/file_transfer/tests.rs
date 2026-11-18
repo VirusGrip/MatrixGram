@@ -320,6 +320,8 @@ async fn transferred_file(
     .unwrap()
     .unwrap();
     let metadata = FileUpload {
+        caption: None,
+        reply_to: None,
         room_id: "!test:example.org".into(),
         name: "large.bin".into(),
         mime: "application/octet-stream".into(),
