@@ -1,0 +1,94 @@
+{
+  "version": "0.5.6",
+  "releaseUrl": "https://github.com/VirusGrip/MatrixGram/releases/tag/v0.5.6",
+  "publishedAt": "2026-11-18T02:42:58Z",
+  "sourceCommit": "8cf5fd98183e2f2a42f0461def54fae96b87a933",
+  "workflowCommit": "8cf5fd98183e2f2a42f0461def54fae96b87a933",
+  "releaseWorkflow": "https://github.com/VirusGrip/MatrixGram/actions/runs/44223246540",
+  "checksWorkflow": "https://github.com/VirusGrip/MatrixGram/actions/runs/44223211360",
+  "artifacts": [
+    {
+      "name": "MatrixGram_0.5.6_x64-setup.exe",
+      "bytes": 15555777,
+      "sha256": "e4e243dbea2f0066767232a396261755ae7e3c8d163b1b03dfef76969d9fdf8b"
+    },
+    {
+      "name": "MatrixGram-0.5.6-android-arm64.apk",
+      "bytes": 53089064,
+      "sha256": "6a01e04e7c5b794326f9defcc9b1c22e0aa4c3ae471b6360f8702d37ad2b40c4"
+    },
+    {
+      "name": "MatrixGram-source-0.5.6.zip",
+      "bytes": 627884,
+      "sha256": "2358e1a985151608047e64f34c607f4a6b88f7896e2ba4fa59ec2e1cc2c16a44"
+    }
+  ],
+  "verified": [
+    "release checksums",
+    "minisign and signed versions",
+    "source ZIP CRC/config/no signing secrets",
+    "APK CRC/arm64/JNI/TLS/update provider",
+    "original Android certificate",
+    "manifest permissions/version",
+    "anonymous latest manifest endpoint"
+  ],
+  "windows": {
+    "architecture": "x64",
+    "updaterSignatureVerified": true,
+    "authenticodeSigned": false,
+    "localCandidateInstallerTested": true,
+    "publishedInstallerExecuted": false,
+    "sameRuntimeSourcesAsTestedCandidate": true,
+    "crossVersionUpdateTested": false,
+    "windows10Tested": false,
+    "osRestartTested": false,
+    "manualValidation": "User verified local 0.5.6 Windows installer: grouping by memory, preserved chats, test toast and activation; installed payload hash matched; temporary trust absent"
+  },
+  "android": {
+    "abi": "arm64-v8a",
+    "minSdk": 26,
+    "targetSdk": 36,
+    "versionCode": 5006,
+    "buildProfile": "release",
+    "apkV2SignatureVerified": true,
+    "certificateSha256": "eb07a7521e27b424fc303b88b4eb5a2bb29697e7cb1a5ac17da2e2f24b3a5e87",
+    "signing": "Original test-installation certificate, retained for update compatibility",
+    "runtimeTested": false,
+    "crossVersionUpdateTested": false
+  },
+  "checks": {
+    "rustCore": 40,
+    "rustApp": 14,
+    "frontendUnit": 43,
+    "browser": 60,
+    "releaseTools": 2,
+    "loadBrowserScenarios": 2,
+    "loadSqliteScenarios": 1,
+    "fmt": "passed",
+    "clippy": "passed",
+    "policy": "passed",
+    "ci": "passed"
+  },
+  "sourceArchive": {
+    "name": "MatrixGram-source-0.5.6.zip",
+    "sha256": "2358e1a985151608047e64f34c607f4a6b88f7896e2ba4fa59ec2e1cc2c16a44",
+    "bytes": 627884,
+    "zipCrcVerified": true
+  },
+  "publishedArtifactsExecuted": false,
+  "localCandidateWindowsInstallationTested": true,
+  "windowsIdentityValidation": {
+    "packageName": "MadFrog.MatrixGram",
+    "identityVersion": "1.0.0.0",
+    "resourcesVerified": 8,
+    "packagedManifestVerified": true,
+    "helperPublicCertificateVerified": true,
+    "localCandidateGroupingByMemory": true,
+    "localCandidateProfilePreserved": true,
+    "localCandidateToastAndActivationVerified": true,
+    "temporaryTrustRemoved": true,
+    "privateKeyAbsent": true,
+    "windows10Tested": false,
+    "osRestartTested": false
+  }
+}
