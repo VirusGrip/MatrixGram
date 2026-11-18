@@ -42,12 +42,12 @@ export function CallService() {
   </section>;
 }
 
-export function CallButtons({ room }: { room: RoomSummary }) {
+export function CallMenuItems({ room, close }: { room: RoomSummary; close: () => void }) {
   const [allowed, setAllowed] = useState(false), engine = useCalls(s => s.engine);
   useEffect(() => { let stale = false; setAllowed(false); if (room.members <= 2 && room.membership === 'joined') void api.op<RoomDetails>('roomDetails', { roomId: room.id }).then(details => { if (!stale) setAllowed(details.members.filter(member => member.membership === 'join').length === 2); }).catch(() => {}); return () => { stale = true; }; }, [room.id, room.members, room.membership]);
   if (!allowed || !engine) return null;
-  const start = (video: boolean) => { void engine.start(room.id, video).catch(e => useStore.getState().setError(errorText(e))); };
-  return <><button className="icon-button" aria-label="Позвонить" onClick={() => start(false)}><Phone size={20}/></button><button className="icon-button" aria-label="Видеозвонок" onClick={() => start(true)}><Video size={21}/></button></>;
+  const start = (video: boolean) => { close(); void engine.start(room.id, video).catch(e => useStore.getState().setError(errorText(e))); };
+  return <><button type="button" role="menuitem" aria-label="Позвонить" onClick={() => start(false)}><Phone size={20}/>Аудиозвонок</button><button type="button" role="menuitem" onClick={() => start(true)}><Video size={21}/>Видеозвонок</button></>;
 }
 
 export const activeCall = () => useCalls.getState().state !== null;

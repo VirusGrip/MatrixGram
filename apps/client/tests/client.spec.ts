@@ -110,7 +110,8 @@ test('mobile navigation and theme work without horizontal overflow', async ({ pa
   await page.screenshot({ path: 'test-results/mobile-chat.png' });
   await page.getByRole('button', { name: 'Назад к чатам' }).click();
   await page.getByRole('button', { name: 'Открыть Команда Matrix' }).click();
-  await page.getByRole('button', { name: 'Информация о комнате', exact: true }).click();
+  await page.getByRole('button', { name: 'Меню чата', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Информация о комнате', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'О комнате' })).toBeVisible();
   await page.getByRole('button', { name: 'Скрыть информацию', exact: true }).click();
   await page.getByRole('button', { name: 'Назад к чатам' }).click();
@@ -270,7 +271,8 @@ test('file upload renders an image and saves authenticated media', async ({ page
 
 test('member list, profile, pin, forward and room settings call the real IPC contract', async ({ page }) => {
   await login(page); await page.getByRole('button', { name: 'Открыть Команда Matrix' }).click();
-  await page.getByRole('button', { name: 'Информация о комнате', exact: true }).click();
+  await page.getByRole('button', { name: 'Меню чата', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Информация о комнате', exact: true }).click();
   await expect(page.locator('.member-row')).toHaveCount(2);
   await page.getByLabel('Поиск участников').fill('Bob');
   await expect(page.locator('.member-row')).toHaveCount(1);
@@ -390,7 +392,8 @@ test('server history search opens a message outside loaded history', async ({ pa
   const found={event_id:'$old-search',sender:'@bob:test',type:'m.room.message',origin_server_ts:500,content:{msgtype:'m.text',body:'Архивная встреча'}};
   const adapter=fixtureApi.replace("if(kind==='search')return {room_events:{results:[],next_batch:null}};", `if(kind==='search')return {room_events:{results:[{result:${JSON.stringify(found)}}],next_batch:null}};if(kind==='event')return ${JSON.stringify(found)};`);
   await login(page,adapter); await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
-  await page.getByRole('button',{name:'Поиск в загруженных сообщениях'}).click();
+  await page.getByRole('button',{name:'Меню чата',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Поиск в загруженных сообщениях'}).click();
   await page.getByPlaceholder('Поиск в загруженной истории').fill('встреча');
   await page.getByRole('button',{name:'Вся история',exact:true}).click();
   await page.getByRole('dialog').getByRole('button').filter({hasText:'Архивная встреча'}).click();
@@ -472,7 +475,8 @@ test('switching chats with information open keeps a single correctly placed conv
   const errors:string[]=[];page.on('console',message=>{if(message.type()==='error')errors.push(message.text())});
   await page.setViewportSize({width:1286,height:900});await login(page);
   await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
-  await page.getByRole('button',{name:'Информация о комнате',exact:true}).click();
+  await page.getByRole('button',{name:'Меню чата',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Информация о комнате',exact:true}).click();
   for(let i=0;i<5;i++) {
     await page.getByRole('button',{name:'Открыть Закрытая комната'}).click();
     await expect(page.locator('.chat-panel')).toHaveCount(1);await expect(page.locator('.room-info')).toHaveCount(1);
