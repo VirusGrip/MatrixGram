@@ -1,0 +1,97 @@
+{
+  "version": "0.5.8",
+  "releaseUrl": "https://github.com/VirusGrip/MatrixGram/releases/tag/v0.5.8",
+  "publishedAt": "2026-11-18T10:44:25Z",
+  "sourceCommit": "4a89c708d1207c7f6cb2020330c48e059a8c3c7e",
+  "workflowCommit": "4a89c708d1207c7f6cb2020330c48e059a8c3c7e",
+  "ciBootstrapCommit": "2b7060b9cc35037ede1f08537c6db8860405daae",
+  "workflowRuntimeSourcesEqualTag": true,
+  "releaseWorkflow": "https://github.com/VirusGrip/MatrixGram/actions/runs/44285866853",
+  "checksWorkflow": "https://github.com/VirusGrip/MatrixGram/actions/runs/44285857109",
+  "ciNsisBootstrapCommit": "2b7060b9cc35037ede1f08537c6db8860405daae",
+  "runtimeSourcesMatchCheckedTag": true,
+  "appTagMoved": false,
+  "artifacts": [
+    {
+      "name": "MatrixGram_0.5.8_x64-setup.exe",
+      "bytes": 15710737,
+      "sha256": "5acd9457c2bb11221b540473e929b1962ce847aff5afd47fecc4332d1a22c134"
+    },
+    {
+      "name": "MatrixGram-0.5.8-android-arm64.apk",
+      "bytes": 53796360,
+      "sha256": "541e6d750c765b882ddcbbc9b10d4adbc9851439dfe840ced58e3a26746fdd0b"
+    },
+    {
+      "name": "MatrixGram-source-0.5.8.zip",
+      "bytes": 674383,
+      "sha256": "49a59a5ac5d81ca6840c81006e6be2db15b9ca4c2f9b37093f1b182b3243b04b"
+    }
+  ],
+  "verified": [
+    "release checksums",
+    "minisign and signed versions",
+    "source ZIP CRC/config/no signing secrets",
+    "APK CRC/arm64/JNI/TLS/update provider",
+    "original Android certificate",
+    "manifest permissions/version",
+    "anonymous latest manifest endpoint",
+    "published Windows payload, identity resources and embedded publisher"
+  ],
+  "fileTransfers": {
+    "clientLimitBytes": 524288000,
+    "serverObservedUploadLimitBytes": 524288000,
+    "serverModified": false,
+    "nativeLoopback500MiBTest": "passed",
+    "liveHomeserverLargeTransferTested": false
+  },
+  "windows": {
+    "architecture": "x64",
+    "updaterSignatureVerified": true,
+    "authenticodeSigned": false,
+    "publishedInstallerExecuted": false,
+    "crossVersionUpdateTested": false,
+    "windows10Tested": false,
+    "osRestartTested": false,
+    "publishedPayloadVerified": true,
+    "identityResourcesVerified": 8,
+    "embeddedIdentityVerified": true,
+    "installerExecuted": false
+  },
+  "android": {
+    "abi": "arm64-v8a",
+    "minSdk": 26,
+    "targetSdk": 36,
+    "versionCode": 5008,
+    "buildProfile": "release",
+    "apkV2SignatureVerified": true,
+    "certificateSha256": "eb07a7521e27b424fc303b88b4eb5a2bb29697e7cb1a5ac17da2e2f24b3a5e87",
+    "runtimeTested": false,
+    "crossVersionUpdateTested": false,
+    "safAndShareOnPhoneTested": false
+  },
+  "checks": {
+    "rustCore": 50,
+    "rustApp": 16,
+    "frontendUnit": 43,
+    "browser": 74,
+    "releaseTools": 2,
+    "loadBrowserScenarios": 2,
+    "loadSqliteScenarios": 1,
+    "loadFile500MiBScenarios": 1,
+    "fmt": "passed",
+    "clippy": "passed",
+    "policy": "passed",
+    "ci": "passed"
+  },
+  "sourceArchive": {
+    "name": "MatrixGram-source-0.5.8.zip",
+    "sha256": "49a59a5ac5d81ca6840c81006e6be2db15b9ca4c2f9b37093f1b182b3243b04b",
+    "bytes": 674383,
+    "zipCrcVerified": true
+  },
+  "publishedArtifactsExecuted": false,
+  "localTargetedBrowserScenarios": 3,
+  "adaptedLegacyAvatarScenario": "passed",
+  "newNativeTestsAdded": 0
+}
