@@ -20,7 +20,8 @@ test('own messages and avatars stay right, peers left; selecting text and photos
     await expect.poll(()=>page.locator('.outgoing .message-avatar img').evaluateAll(images=>images.some(image=>(image as HTMLImageElement).naturalWidth>0))).toBe(true);
     const before=await boxes(page),timeline=await page.locator('.timeline').boundingBox();
     expect(before[0].right).toBeLessThan(before[1].right);expect(before[1].right).toBeGreaterThan(timeline!.x+timeline!.width*.65);
-    const avatar=await page.locator('.outgoing .message-avatar').last().boundingBox();expect(avatar!.x).toBeGreaterThan(before[2].right);
+    if(viewport.width>720){const avatar=await page.locator('.outgoing .message-avatar').last().boundingBox();expect(avatar!.x).toBeGreaterThan(before[2].right);}
+    else await expect(page.locator('.outgoing .message-avatar').last()).toBeHidden();
     const headerHeight=(await page.locator('.chat-header').boundingBox())!.height;
     await page.locator('.bubble').nth(2).click({button:'right'});await page.getByRole('menuitem',{name:'Выделить сообщение',exact:true}).click();
     await page.getByLabel('Выбрать: Моё сообщение',{exact:true}).check();

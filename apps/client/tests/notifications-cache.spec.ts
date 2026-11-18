@@ -42,8 +42,10 @@ test.describe('touch message actions',()=>{
   test('thumb action is hidden and reactions are available through the message menu',async({page})=>{
     await login(page);await page.getByRole('button',{name:'Открыть Команда Matrix',exact:true}).click();
     await expect(page.getByRole('button',{name:'Реакция 👍',exact:true})).toBeHidden();
-    await page.getByRole('button',{name:'Действия с сообщением',exact:true}).click();
+    const bubble=page.locator('.bubble').first();
+    await bubble.dispatchEvent('pointerdown',{pointerId:1,pointerType:'touch',isPrimary:true,button:0,clientX:80,clientY:200});
     await expect(page.getByRole('menuitem',{name:'Выделить сообщение',exact:true})).toBeVisible();
+    await bubble.dispatchEvent('pointerup',{pointerId:1,pointerType:'touch',isPrimary:true});
     await expect(page.locator('.message-menu')).toBeVisible();
   });
 });
