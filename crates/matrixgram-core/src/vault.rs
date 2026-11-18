@@ -222,11 +222,156 @@ mod android {
             }
         }
     }
+    pub struct AndroidDownload {
+        id: String,
+        file: Option<std::fs::File>,
+        completed: bool,
+    }
+    impl AndroidDownload {
+        pub fn take_file(&mut self) -> Result<std::fs::File> {
+            self.file
+                .take()
+                .ok_or_else(|| CoreError::User("Файл сохранения уже открыт".into()))
+        }
+        pub fn finish(mut self, success: bool) -> Result<()> {
+            self.file.take();
+            self.completed = true;
+            finish_download(&self.id, success)
+        }
+    }
+    impl Drop for AndroidDownload {
+        fn drop(&mut self) {
+            self.file.take();
+            if !self.completed {
+                let _ = finish_download(&self.id, false);
+            }
+        }
+    }
+    fn finish_download(id: &str, success: bool) -> Result<()> {
+        let (vm, activity) = bridge()?;
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|_| CoreError::User("Android недоступен".into()))?;
+        let id = env
+            .new_string(id)
+            .map_err(|_| CoreError::User("Ошибка сохранения Android".into()))?;
+        match env.call_method(
+            activity.as_obj(),
+            "finishLargeDownload",
+            "(Ljava/lang/String;Z)V",
+            &[JValue::Object(id.as_ref()), JValue::Bool(success.into())],
+        ) {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                let _ = env.exception_clear();
+                Err(CoreError::User(
+                    "Не удалось завершить сохранение Android".into(),
+                ))
+            }
+        }
+    }
+    pub fn create_download(name: &str) -> Result<Option<AndroidDownload>> {
+        use std::os::fd::FromRawFd;
+        let (vm, activity) = bridge()?;
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|_| CoreError::User("Android недоступен".into()))?;
+        let name = env
+            .new_string(name)
+            .map_err(|_| CoreError::User("Некорректное имя файла".into()))?;
+        let result = env.call_method(
+            activity.as_obj(),
+            "createLargeDownload",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            &[JValue::Object(name.as_ref())],
+        );
+        let value = match result.and_then(|v| v.l()) {
+            Ok(value) => value,
+            Err(_) => {
+                let _ = env.exception_clear();
+                return Err(CoreError::User(
+                    "Не удалось открыть сохранение Android".into(),
+                ));
+            }
+        };
+        let value: jni::objects::JString = value.into();
+        let text: String = env
+            .get_string(&value)
+            .map_err(|_| CoreError::User("Ошибка выбора файла".into()))?
+            .into();
+        if text.is_empty() {
+            return Ok(None);
+        }
+        #[derive(serde::Deserialize)]
+        struct Selection {
+            id: String,
+            fd: i32,
+        }
+        let selection: Selection = serde_json::from_str(&text)?;
+        if selection.fd < 0 || uuid::Uuid::parse_str(&selection.id).is_err() {
+            return Err(CoreError::User("Некорректный файл Android".into()));
+        }
+        Ok(Some(AndroidDownload {
+            id: selection.id,
+            file: Some(unsafe { std::fs::File::from_raw_fd(selection.fd) }),
+            completed: false,
+        }))
+    }
+    pub fn open_shared_file(handle: &str) -> Result<std::fs::File> {
+        use std::os::fd::FromRawFd;
+        let (vm, activity) = bridge()?;
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|_| CoreError::User("Android недоступен".into()))?;
+        let handle = env
+            .new_string(handle)
+            .map_err(|_| CoreError::User("Некорректный файл".into()))?;
+        match env
+            .call_method(
+                activity.as_obj(),
+                "openSharedFile",
+                "(Ljava/lang/String;)I",
+                &[JValue::Object(handle.as_ref())],
+            )
+            .and_then(|value| value.i())
+        {
+            Ok(fd) if fd >= 0 => Ok(unsafe { std::fs::File::from_raw_fd(fd) }),
+            _ => {
+                let _ = env.exception_clear();
+                Err(CoreError::User(
+                    "Android не смог открыть выбранный файл".into(),
+                ))
+            }
+        }
+    }
+    pub fn release_shared_file(handle: &str) -> Result<()> {
+        let (vm, activity) = bridge()?;
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|_| CoreError::User("Android недоступен".into()))?;
+        let handle = env
+            .new_string(handle)
+            .map_err(|_| CoreError::User("Некорректный файл".into()))?;
+        match env.call_method(
+            activity.as_obj(),
+            "releaseSharedFile",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(handle.as_ref())],
+        ) {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                let _ = env.exception_clear();
+                Err(CoreError::User("Не удалось освободить файл Android".into()))
+            }
+        }
+    }
 }
 #[cfg(target_os = "android")]
 pub use android::{
-    initialize as initialize_android_vault, notifications as android_notification_permissions,
-    permissions as android_media_permissions, save_file as android_save_file,
+    create_download as android_create_download, initialize as initialize_android_vault,
+    notifications as android_notification_permissions,
+    open_shared_file as android_open_shared_file, permissions as android_media_permissions,
+    release_shared_file as android_release_shared_file, save_file as android_save_file,
 };
 #[cfg(target_os = "android")]
 pub fn save(path: &Path, plaintext: &[u8]) -> Result<bool> {

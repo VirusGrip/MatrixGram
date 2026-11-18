@@ -1388,3 +1388,215 @@ async fn already_revoked_session_can_still_be_logged_out_locally() {
         .await;
     f.account.logout().await.unwrap();
 }
+
+#[tokio::test]
+async fn streaming_upload_checks_server_limit_and_locked_rooms_before_content() {
+    use crate::file_transfer::{FileUpload, MAX_FILE_BYTES};
+    let f = fixture(false).await;
+    unencrypted_state(&f.server).await;
+    streaming_power_levels(&f, 0).await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"/_matrix/(media/v3|client/v1/media)/config$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"m.upload.size":104857600})))
+        .mount(&f.server)
+        .await;
+    let metadata = FileUpload {
+        room_id: "!test:example.org".into(),
+        name: "five-hundred-mib.bin".into(),
+        mime: "application/octet-stream".into(),
+        txn: "stream-limit".into(),
+        size: MAX_FILE_BYTES,
+    };
+    let error = f
+        .account
+        .prepare_file_upload(&metadata)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("100 МБ"));
+    assert!(
+        !f.server.received_requests().await.unwrap().iter().any(|r| r
+            .url
+            .path()
+            .contains("/media/")
+            && r.url.path().ends_with("/upload"))
+    );
+    let locked = fixture(true).await;
+    assert!(locked.account.prepare_file_upload(&metadata).await.is_err());
+    assert!(
+        !locked
+            .server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .any(|r| r.url.path().contains("/media/"))
+    );
+}
+#[tokio::test]
+async fn streaming_transfer_limits_observe_server_configuration_changes() {
+    let f = fixture(false).await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"/_matrix/(media/v3|client/v1/media)/config$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"m.upload.size":524288000})))
+        .mount(&f.server)
+        .await;
+    assert_eq!(
+        f.account.transfer_limits().await.unwrap().effective_bytes,
+        524288000
+    );
+    Mock::given(method("GET"))
+        .and(path_regex(r"/_matrix/(media/v3|client/v1/media)/config$"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"m.upload.size":2147483648u64})),
+        )
+        .with_priority(1)
+        .mount(&f.server)
+        .await;
+    let updated = f.account.transfer_limits().await.unwrap();
+    assert_eq!(updated.server_bytes, 2147483648);
+    assert_eq!(updated.effective_bytes, 524288000);
+}
+#[tokio::test]
+async fn streaming_upload_preserves_plaintext_and_e2ee_room_contracts() {
+    use crate::file_transfer::{FileUpload, PreparedFile, quiet_progress};
+    for encrypted in [false, true] {
+        let f = fixture(encrypted).await;
+        streaming_power_levels(&f, 0).await;
+        if encrypted {
+            f.account.enable_encryption().await.unwrap();
+            Mock::given(method("GET"))
+                .and(path_regex(
+                    r"/_matrix/client/v3/rooms/.*/state/m.room.encryption/?$",
+                ))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(json!({"algorithm":"m.megolm.v1.aes-sha2"})),
+                )
+                .mount(&f.server)
+                .await;
+            Mock::given(method("GET")).and(path_regex(r"/_matrix/client/v3/rooms/.*/members$"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"chunk":[{"type":"m.room.member","state_key":"@alice:example.org","sender":"@alice:example.org","event_id":"$m","origin_server_ts":2,"content":{"membership":"join"}}]}))).mount(&f.server).await;
+        } else {
+            unencrypted_state(&f.server).await;
+        }
+        Mock::given(method("GET"))
+            .and(path_regex(r"/_matrix/(media/v3|client/v1/media)/config$"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"m.upload.size":2147483648u64})),
+            )
+            .mount(&f.server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"/_matrix/(media/v3|client/v1/media)/upload$"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"content_uri":"mxc://example.org/stream"})),
+            )
+            .mount(&f.server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path_regex(
+                r"/_matrix/client/v3/rooms/.*/send/m.room.(message|encrypted)/stream-contract$",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"event_id":"$stream"})))
+            .mount(&f.server)
+            .await;
+        let marker = b"PRIVATE STREAM CONTENT";
+        let folder = tempfile::tempdir().unwrap();
+        let token = tokio_util::sync::CancellationToken::new();
+        let prepared = PreparedFile::from_reader(
+            &marker[..],
+            folder.path(),
+            Some(marker.len() as u64),
+            &token,
+            quiet_progress(),
+        )
+        .unwrap();
+        let metadata = FileUpload {
+            room_id: "!test:example.org".into(),
+            name: "stream.bin".into(),
+            mime: "application/octet-stream".into(),
+            txn: "stream-contract".into(),
+            size: marker.len() as u64,
+        };
+        assert_eq!(
+            f.account
+                .send_prepared_file(metadata, prepared, token, quiet_progress())
+                .await
+                .unwrap(),
+            "$stream"
+        );
+        let requests = f.server.received_requests().await.unwrap();
+        let content = requests
+            .iter()
+            .find(|r| {
+                r.method == "POST"
+                    && r.url.path().contains("/media/")
+                    && r.url.path().ends_with("/upload")
+            })
+            .unwrap();
+        assert_eq!(
+            content.headers.get("authorization").unwrap(),
+            "Bearer not-a-real-token"
+        );
+        let event = requests
+            .iter()
+            .find(|r| r.url.path().contains("/send/m.room."))
+            .unwrap();
+        if encrypted {
+            assert_ne!(content.body, marker);
+            assert!(event.url.path().contains("/m.room.encrypted/"));
+            assert!(!String::from_utf8_lossy(&event.body).contains("PRIVATE STREAM"));
+        } else {
+            assert_eq!(content.body, marker);
+            assert_eq!(
+                event.body_json::<Value>().unwrap()["url"],
+                "mxc://example.org/stream"
+            );
+        }
+    }
+}
+
+async fn streaming_power_levels(f: &Fixture, required: u32) {
+    let mut update = sync_response(false);
+    update["next_batch"] = json!(format!("power-{required}"));
+    update["rooms"]["join"]["!test:example.org"]["state"]["events"].as_array_mut().unwrap().push(json!({"type":"m.room.power_levels","state_key":"","sender":"@alice:example.org","event_id":format!("$power-{required}"),"origin_server_ts":25,"content":{"users":{"@alice:example.org":0},"events":{"m.room.message":required}}}));
+    Mock::given(method("GET"))
+        .and(path("/_matrix/client/v3/sync"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(update))
+        .with_priority(1)
+        .mount(&f.server)
+        .await;
+    f.account.sync_once().await.unwrap();
+}
+
+#[tokio::test]
+async fn streaming_read_only_room_rejects_before_media_upload() {
+    use crate::file_transfer::FileUpload;
+    let f = fixture(false).await;
+    unencrypted_state(&f.server).await;
+    streaming_power_levels(&f, 50).await;
+    let metadata = FileUpload {
+        room_id: "!test:example.org".into(),
+        name: "file.bin".into(),
+        mime: "application/octet-stream".into(),
+        txn: "read-only-file".into(),
+        size: 100,
+    };
+    let error = f
+        .account
+        .prepare_file_upload(&metadata)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("нельзя отправлять"));
+    assert!(
+        !f.server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .any(|r| r.url.path().contains("/media/"))
+    );
+}

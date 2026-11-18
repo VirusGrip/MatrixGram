@@ -60,6 +60,12 @@ export const api = {
    return null;
  },
  media:async source=>({data:mediaStore[source.url]||pixel}),
+ downloadFile:async(name,source,txn)=>{window.__savedFile={name,data:mediaStore[source.url]||pixel};return true},
+ releaseSharedFile:async()=>{},uploadSharedFile:async upload=>{window.__nativeSharedUpload=upload;return '$shared'},
+ fileTransferLimits:async()=>({clientBytes:524288000,serverBytes:524288000,effectiveBytes:524288000}),
+ beginFileUpload:async upload=>{window.__largeUploads=window.__largeUploads||{};window.__largeUploads[upload.txn]={...upload,current:0,maxChunk:0}},
+ fileUploadChunk:async(txn,offset,bytes)=>{const item=window.__largeUploads[txn];if(offset!==item.current)throw Error('Unexpected offset');item.current+=bytes.byteLength;item.maxChunk=Math.max(item.maxChunk,bytes.byteLength)},
+ finishFileUpload:async txn=>{const item=window.__largeUploads[txn];if(item.current!==item.size)throw Error('Incomplete file');return '$large'},
  upload:async upload=>{window.__uploads=[...(window.__uploads||[]),{...upload,data:undefined,bytes:atob(upload.data).length}];if(upload.target==='profile')return 'mxc://test/avatar';const id='$upload'+Date.now(),url='mxc://test/'+upload.txn;mediaStore[url]=upload.data;events.push({event_id:id,sender:session.userId,type:'m.room.message',origin_server_ts:Date.now(),content:{msgtype:upload.voice?'m.audio':upload.mime.startsWith('image/')?'m.image':'m.file',body:upload.name,url,info:{mimetype:upload.mime,size:20,duration:upload.durationMs},...(upload.voice?{'org.matrix.msc3245.voice':{}}:{})}});setTimeout(()=>publish(upload.roomId),5);return id;},
  cancelUpload:async()=>{},saveFile:async(name,data)=>{window.__savedFile={name,data};return true},
  windowsIntegration:async()=>({supported:false,active:false,setupAvailable:false,configured:false}),

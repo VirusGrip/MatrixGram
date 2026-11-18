@@ -2,6 +2,8 @@ import { createElement, useEffect, useMemo, useRef, useState, type ReactNode } f
 import { Download, FileText, Mic, Pause, Play, Send, Square, Trash2 } from 'lucide-react';
 import { api } from './api';
 import { fileBase64 } from './files';
+import {INLINE_FILE_BYTES} from './files';
+import {downloadAttachment,useDownloads,downloadKey,cancelDownload} from './Downloads';
 export { fileBase64 } from './files';
 export { Uploads } from './Transfers';
 import { useStore } from './store';
@@ -43,24 +45,28 @@ export function useMedia(source: Record<string, unknown> | undefined, mime: stri
   }, [key, mime, enabled, session]);
   return { url, error };
 }
-export const fileSize = (size?: number) => size == null ? '' : size < 1024 ? `${size} Б` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} КБ` : `${(size / 1024 / 1024).toFixed(1)} МБ`;
+export const fileSize = (size?: number) => size == null ? '' : size < 1024 ? `${size} Б` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} КБ` : size < 1024*1024*1024 ? `${(size / 1024 / 1024).toFixed(1)} МБ` : `${(size/1024/1024/1024).toFixed(1)} ГБ`;
 export async function saveAttachment(attachment: Attachment) {
-  const data = await mediaBytes(attachment.source);
-  await api.saveFile(attachment.name, data);
+  await downloadAttachment(attachment);
 }
 
 export function MediaView({ attachment }: { attachment: Attachment }) {
+  const session=useStore(s=>s.session),large=(attachment.size??0)>INLINE_FILE_BYTES;
+  const key=downloadKey(attachment.source,`${session?.userId}|${session?.deviceId}`);
+  const download=useDownloads(s=>s.tasks.find(t=>t.key===key));
   const host = useRef<HTMLDivElement>(null), [visible, setVisible] = useState(false);
   useEffect(() => { const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) { setVisible(true); observer.disconnect(); } }, { rootMargin: '200px' }); if (host.current) observer.observe(host.current); return () => observer.disconnect(); }, []);
   const [opened, setOpened] = useState(false), [load, setLoad] = useState(attachment.kind === 'm.image' && (attachment.size ?? 0) <= 5 * 1024 * 1024), [saving, setSaving] = useState(false);
-  const { url, error } = useMedia(attachment.source, attachment.mime, visible && load || opened);
+  const { url, error } = useMedia(attachment.source, attachment.mime, !large&&(visible && load || opened));
   const save = async () => { setSaving(true); try { await saveAttachment(attachment); } catch (e) { useStore.getState().setError(e); } finally { setSaving(false); } };
   return <div ref={host} className={`media-content media-${attachment.kind.slice(2)}`}>
     {attachment.kind === 'm.image' && url ? <button className="image-preview" aria-label={`Открыть изображение ${attachment.name}`} onClick={() => setOpened(true)}><img src={url} alt={attachment.name} loading="lazy"/></button>
       : (attachment.kind === 'm.video' || attachment.kind === 'm.audio') && url ? attachment.kind === 'm.video' ? <video src={url} controls preload="metadata"/> : <audio src={url} controls preload="metadata"/>
-      : <button className="file-preview" onClick={() => { if (attachment.kind === 'm.file') void save(); else setLoad(true); }} disabled={saving} aria-label={`Загрузить ${attachment.name}`}><FileText size={28}/><span><strong>{attachment.voice ? 'Голосовое сообщение' : attachment.name}</strong><small>{fileSize(attachment.size)} {attachment.duration ? `· ${Math.round(attachment.duration / 1000)} сек.` : ''}{load && !error ? ' · Загрузка…' : ''}</small></span><Download size={18}/></button>}
+      : <button className="file-preview" onClick={() => { if (attachment.kind === 'm.file'||large) void save(); else setLoad(true); }} disabled={saving||download?.state==='downloading'||download?.state==='saving'} aria-label={`Загрузить ${attachment.name}`}><FileText size={28}/><span><strong>{attachment.voice ? 'Голосовое сообщение' : attachment.name}</strong><small>{fileSize(attachment.size)} {attachment.duration ? `· ${Math.round(attachment.duration / 1000)} сек.` : ''}{load && !large && !error ? ' · Загрузка…' : ''}{large?' · Сохранить на устройство':''}</small></span><Download size={18}/></button>}
+    {download&&(download.state==='downloading'||download.state==='saving')&&<div className="download-progress" role="status"><small>{download.state==='saving'?'Сохранение…':'Загрузка…'} {download.total>0?`${Math.min(100,Math.floor(download.current/download.total*100))}%`:fileSize(download.current)}</small><progress max={download.total||undefined} value={download.total?download.current:undefined}/><button className="text-button" onClick={()=>cancelDownload(download.txn)}>Отменить загрузку</button></div>}
+    {download?.state==='saved'&&<small role="status">Файл сохранён</small>}
     {error && <div className="media-error">{error}<button className="text-button" onClick={() => { evict(JSON.stringify(attachment.source)); setLoad(false); requestAnimationFrame(() => setLoad(true)); }}>Повторить</button></div>}
-    {url && <button className="text-button media-save" disabled={saving} onClick={() => { void save(); }}><Download size={13}/>Сохранить</button>}
+    {(url||error) && <button className="text-button media-save" disabled={saving} onClick={() => { void save(); }}><Download size={13}/>Сохранить</button>}
     {opened && <Modal title={attachment.name} close={() => setOpened(false)}><div className="media-viewer">{url && <img src={url} alt={attachment.name}/>}<button className="primary" onClick={() => { void save(); }}>Сохранить изображение</button></div></Modal>}
   </div>;
 }

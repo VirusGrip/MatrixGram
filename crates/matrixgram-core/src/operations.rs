@@ -631,18 +631,11 @@ impl Account {
                 data: STANDARD.encode(bytes),
             });
         }
-        let bytes = self
-            .client
-            .media()
-            .get_media_content(
-                &MediaRequestParameters {
-                    source,
-                    format: MediaFormat::File,
-                },
-                false,
-            )
-            .await
-            .map_err(network_error)?;
+        // Preview responses are bounded while reading the network. Large saves
+        // use file_transfer::download_to_path and never cross base64 IPC.
+        let directory = self.store_path.join("file-transfers");
+        std::fs::create_dir_all(&directory)?;
+        let bytes = crate::file_transfer::preview_bytes(&self.client, source, &directory).await?;
         if bytes.len() > MAX_MEDIA {
             return Err(CoreError::User("Файл превышает лимит клиента 25 МБ".into()));
         }

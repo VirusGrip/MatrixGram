@@ -1,0 +1,14 @@
+{
+  "bytes": 524288000,
+  "encrypted": true,
+  "uploadAndDownloadVerified": true,
+  "peakWorkingSetSampledBytes": 23191552,
+  "samplingMs": 500,
+  "elapsedMs": 167446,
+  "fixture": "actual 500 MiB loopback transfer with SDK attachment encryption; test process measurement, not installed app or live Matrix upload",
+  "version": "0.5.7",
+  "clientLimitBytes": 524288000,
+  "serverObservedUploadLimitBytes": 524288000,
+  "serverModified": false,
+  "measurement": "sampled process WorkingSet64, not private working set or app process tree"
+}

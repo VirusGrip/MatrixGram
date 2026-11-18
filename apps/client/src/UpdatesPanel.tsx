@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
 import { api, nativeAvailable, onAppUpdateProgress } from './api';
 import { errorText } from './ui';
-import { useUploads } from './Transfers';
+import { hasActiveFileTransfers } from './Transfers';
 import { activeCall } from './Calls';
 import { prepareForUpdate } from './UpdatePreparation';
 import { useUpdates, initializeUpdates, checkUpdates } from './UpdateService';
@@ -28,7 +28,7 @@ export function UpdatesPanel() {
   async function download() {setBusy(true);setError('');setProgress('0%');try{await api.downloadUpdate();setReady(true);setMessage('Обновление скачано и проверено')}catch(e){setError(errorText(e));setReady(false)}finally{setBusy(false);setProgress('')}}
   async function install() {
     if(activeCall()){setError('Завершите звонок перед установкой обновления');return}
-    if(useUploads.getState().tasks.some(task=>task.state==='queued'||task.state==='uploading')){setError('Дождитесь отправки файлов или отмените их перед обновлением');return}
+    if(hasActiveFileTransfers()){setError('Дождитесь передачи файлов или отмените её перед обновлением');return}
     setBusy(true);setError('');
     try{await prepareForUpdate();const result=await api.installUpdate();setMessage(result==='permission'?'Разрешите установку обновлений для MatrixGram в настройках Android, вернитесь и нажмите «Установить» ещё раз.':'Открыт системный установщик. Подтвердите обновление.')}catch(e){setError(errorText(e));setReady(false)}finally{setBusy(false)}
   }

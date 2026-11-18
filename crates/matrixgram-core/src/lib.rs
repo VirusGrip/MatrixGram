@@ -1,5 +1,6 @@
 pub mod cache;
 mod features;
+pub mod file_transfer;
 #[cfg(test)]
 mod integration_tests;
 mod local_history;
@@ -9,7 +10,8 @@ pub mod policy;
 mod vault;
 #[cfg(target_os = "android")]
 pub use vault::{
-    android_media_permissions, android_notification_permissions, android_save_file,
+    android_create_download, android_media_permissions, android_notification_permissions,
+    android_open_shared_file, android_release_shared_file, android_save_file,
     initialize_android_vault,
 };
 

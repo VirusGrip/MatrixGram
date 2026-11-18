@@ -9,6 +9,7 @@ use std::{sync::Arc, time::Duration};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::{Mutex, RwLock};
 mod accounts;
+mod file_transfers;
 mod memory_usage;
 #[cfg_attr(mobile, allow(dead_code))]
 mod notifications;
@@ -189,6 +190,7 @@ async fn logout(app: tauri::AppHandle, state: State<'_, Backend>) -> Result<(), 
     for token in state.transfers.lock().await.values() {
         token.cancel();
     }
+    app.state::<file_transfers::FileTransfers>().clear().await;
     state
         .account()
         .await?
@@ -533,6 +535,7 @@ async fn add_account(
     for token in state.transfers.lock().await.values() {
         token.cancel();
     }
+    app.state::<file_transfers::FileTransfers>().clear().await;
     Ok(state.activate_arc(app, account).await)
 }
 #[tauri::command]
@@ -569,6 +572,7 @@ async fn switch_account(
     for token in state.transfers.lock().await.values() {
         token.cancel();
     }
+    app.state::<file_transfers::FileTransfers>().clear().await;
     Ok(state.activate_arc(app, account).await)
 }
 #[tauri::command]
@@ -615,13 +619,21 @@ async fn upload_file(
     result
 }
 #[tauri::command]
-async fn cancel_upload(state: State<'_, Backend>, txn: String) -> Result<(), String> {
+async fn cancel_upload(
+    app: tauri::AppHandle,
+    state: State<'_, Backend>,
+    txn: String,
+) -> Result<(), String> {
     let mut transfers = state.transfers.lock().await;
-    if let Some(token) = transfers.get(&txn) {
+    if let Some(token) = transfers.remove(&txn) {
         token.cancel();
     } else if transfers.len() < 100 {
-        transfers.entry(txn).or_default().cancel();
+        transfers.entry(txn.clone()).or_default().cancel();
     }
+    drop(transfers);
+    app.state::<file_transfers::FileTransfers>()
+        .cancel(&txn)
+        .await;
     Ok(())
 }
 #[tauri::command]
@@ -807,6 +819,7 @@ pub fn run() {
         .manage(updates::Updates::default())
         .manage(notifications::Notifications::default())
         .manage(memory_usage::MemoryMonitor::default())
+        .manage(file_transfers::FileTransfers::default())
         .invoke_handler(tauri::generate_handler![
             bootstrap,
             login,
@@ -836,6 +849,13 @@ pub fn run() {
             client_operation,
             fetch_media,
             upload_file,
+            file_transfers::file_transfer_limits,
+            file_transfers::begin_file_upload,
+            file_transfers::file_upload_chunk,
+            file_transfers::finish_file_upload,
+            file_transfers::download_file,
+            file_transfers::upload_shared_file,
+            file_transfers::release_shared_file,
             cancel_upload,
             save_download,
             desktop_settings,
