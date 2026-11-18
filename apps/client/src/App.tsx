@@ -10,12 +10,13 @@ import {ComposerInput} from './ComposerInput';
 import {MessageMenu, type MessageMenuTarget} from './MessageMenu';
 import { EncryptionDialog, FolderManager, PeopleSearch } from './SidebarFeatures';
 import { memberLabel, sameMessageGroup } from './presentation';
-import { clearMediaCache, FormattedText, MediaView, Uploads, VoiceRecorder } from './Media';
+import { clearMediaCache, FormattedText, MediaView, VoiceRecorder } from './Media';
 import { AccountProfile, DevicesPanel, ForwardDialog, KeyExport, PersonProfile, RoomDirectory, RoomInfo } from './RoomFeatures';
 import { DesktopPreferences, notifyMessages } from './SettingsExtras';
 import { CallButtons, CallService } from './Calls';
 import { Accounts } from './Accounts';
-import { TransferService, useUploads } from './Transfers';
+import {TransferService,OutgoingFiles,enqueueFiles} from './Transfers';
+import {AttachedFiles,attachFiles,takeAttachments,takeSharedText,useAttachments} from './Attachments';
 import { useIncomingShare } from './IncomingShare';
 import { HistorySearch } from './HistorySearch';
 import { RoomList } from './ChatList';
@@ -66,7 +67,7 @@ function Login({ loading }: { loading: boolean }) {
       <p className="login-note"><KeyRound size={17}/>Зашифрованные комнаты можно открыть после входа.<br/>Восстановление ключей необязательно.</p>
       {!loading && nativeAvailable() && <Accounts savedOnly/>}
     </section>
-    <footer>MatrixGram · 0.5.8 · ранняя версия</footer>
+    <footer>MatrixGram · 0.5.9 · ранняя версия</footer>
   </main>;
 }
 
@@ -131,7 +132,7 @@ function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSu
   const [find, setFind] = useState(''), [searchOpen, setSearchOpen] = useState(false);
   const [serverSearch, setServerSearch] = useState(false), [highlight, setHighlight] = useState('');
   const focusMessage = useRef<string | null>(null);
-  const [forward, setForward] = useState<Message[] | null>(null), [person, setPerson] = useState(''), [files, setFiles] = useState<File[]>([]), [recording, setRecording] = useState(false), [emoji, setEmoji] = useState(false), [markdown, setMarkdown] = useState(false), [context, setContext] = useState<(MessageMenuTarget & {message:Message}) | null>(null);
+  const [forward, setForward] = useState<Message[] | null>(null), [person, setPerson] = useState(''), [recording, setRecording] = useState(false), [emoji, setEmoji] = useState(false), [markdown, setMarkdown] = useState(false), [context, setContext] = useState<(MessageMenuTarget & {message:Message}) | null>(null);
   const contactNames = useStore(s => s.contactNames);
   const [selecting, setSelecting] = useState(false), [selected, setSelected] = useState<Set<string>>(new Set());
   const selectedMessages = useMemo(() => messages.filter(message => selected.has(message.id) && !message.deleted && !message.encrypted), [messages, selected]);
@@ -144,7 +145,8 @@ function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSu
   }
   useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !document.querySelector('dialog[open]')) clearSelection(); }; if (selecting) window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape); }, [selecting]);
   const fileInput = useRef<HTMLInputElement>(null);
-  const hasTransfers = useUploads(s => s.tasks.some(task => task.roomId === room.id));
+  const files=useAttachments(s=>s.files[room.id])??[];
+  const incomingText=useAttachments(s=>s.text[room.id]);
   const profiles = useStore(s => s.profiles[room.id]);
   const ownProfile = useStore(s => s.ownProfile);
   function openMessageMenu(message: Message, event: ReactMouseEvent<HTMLElement>) {
@@ -190,12 +192,13 @@ function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSu
     if (room.membership !== 'joined' || blocked) { setLoading(false); return; }
     let cancelled = false; setLoading(true);
     void useStore.getState().load(room.id).catch(e => { if (!cancelled) useStore.getState().setError(e); }).finally(() => { if (!cancelled) setLoading(false); });
-    void api.draft(room.id).then(value => { if (!cancelled) { setBody(value); draftReady.current = true; } }).catch(e => useStore.getState().setError(e));
+    void api.draft(room.id).then(value => { if (!cancelled) { const shared=takeSharedText(room.id);setBody([value,shared].filter(Boolean).join('\n')); draftReady.current = true; } }).catch(e => useStore.getState().setError(e));
     return () => {
       cancelled = true;
       if (draftReady.current && !editing.current) void api.saveDraft(room.id, draftBody.current).catch(() => {});
     };
   }, [room.id, room.membership, blocked]);
+  useEffect(()=>{if(incomingText&&draftReady.current&&!edit){const text=takeSharedText(room.id);if(text)setBody(current=>[current,text].filter(Boolean).join('\n'));}},[incomingText,edit,room.id]);
   useEffect(() => {
     if (!draftReady.current || edit) return;
     const timer = window.setTimeout(() => { void api.saveDraft(room.id, body).catch(e => useStore.getState().setError(e)); }, 400);
@@ -209,7 +212,7 @@ function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSu
       if(stick.current) viewport.scrollTop=viewport.scrollHeight;
     };
     const observer = new ResizeObserver(measure);
-    observer.observe(viewport); observer.observe(element); measure();
+    observer.observe(viewport); observer.observe(element); if(viewport.firstElementChild)observer.observe(viewport.firstElementChild); measure();
     return () => observer.disconnect();
   }, [blocked, room.membership]);
   useLayoutEffect(() => {
@@ -241,17 +244,18 @@ function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSu
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!body.trim() || sending || blocked || !canSend) return;
+    if ((!body.trim() && (edit || !files.length)) || sending || blocked || !canSend) return;
     setSending(true); const value = body;
     try {
       let success = true;
       if (edit) { await api.edit(room.id, edit.id, value); setEdit(null); }
+      else if(files.length){success=enqueueFiles(room.id,files,value,reply?.id);if(success)takeAttachments(room.id);}
       else if (markdown && !reply) { await api.op('formatted', { roomId: room.id, body: value, txn: crypto.randomUUID() }); }
       else success = await useStore.getState().send(room.id, value, reply?.id);
       if (success) { setBody(current => current === value ? '' : current); setReply(null); await api.saveDraft(room.id, ''); stick.current = true; }
     } catch (e) { useStore.getState().setError(e); } finally { setSending(false); }
   }
-  return <section className="chat-panel" onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }} onDrop={e => { if (e.dataTransfer.files.length && !blocked && canSend) { e.preventDefault(); setFiles([...e.dataTransfer.files]); } }}>
+  return <section className="chat-panel" onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }} onDrop={e => { if(e.dataTransfer.files.length){e.preventDefault();if(!blocked&&canSend&&!edit)attachFiles(room.id,[...e.dataTransfer.files]);} }}>
     {!selecting && <header className="chat-header">
       <button className="icon-button back-button" aria-label="Назад к чатам" onClick={() => useStore.getState().select(null)}><ArrowLeft/></button>
       {room.directUserId && <button className="chat-avatar" aria-label="Профиль собеседника" onClick={() => setPerson(room.directUserId!)}><Avatar name={room.name} url={room.avatarUrl} size="small"/></button>}
@@ -285,14 +289,14 @@ function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSu
                 {!mine && !joinsPrevious && <button className="sender" onClick={() => setPerson(message.sender)}>{sender}</button>}
                 {message.replyTo && <blockquote>{messagesById.get(message.replyTo)?.body ?? 'Ответ на более раннее сообщение'}</blockquote>}
                 {message.attachment && <MediaView attachment={message.attachment}/>}
-                <div className="message-body"><div className="message-text">{!message.attachment && <FormattedText html={message.formattedBody} fallback={message.body} onMention={setPerson}/>}</div><span className="message-meta">{message.edited && 'изменено · '}{time(message.ts)}{mine && (readThrough >= message.ts ? <CheckCheck size={14} aria-label="Прочитано"/> : <Check size={14} aria-label="Отправлено на сервер"/>)}</span></div>
+                <div className="message-body"><div className="message-text">{(!message.attachment||message.attachment.caption)&&<FormattedText html={message.formattedBody} fallback={message.attachment?.caption??message.body} onMention={setPerson}/>}</div><span className="message-meta">{message.edited && 'изменено · '}{time(message.ts)}{mine && (readThrough >= message.ts ? <CheckCheck size={14} aria-label="Прочитано"/> : <Check size={14} aria-label="Отправлено на сервер"/>)}</span></div>
                 {message.reactions.length > 0 && <div className="reactions">{message.reactions.map(r => <span key={r.key}>{r.key} {r.count}</span>)}</div>}
                 {!selecting && !message.deleted && !message.encrypted && <><button className="touch-message-menu" aria-label="Действия с сообщением" onClick={e => openMessageMenu(message,e)}>···</button><div className="message-actions">
                   <button title="Ответить" aria-label="Ответить" onClick={() => { setReply(message); setEdit(null); }}><Reply size={15}/></button>
                   <button title="Реакция 👍" aria-label="Реакция 👍" onClick={() => { void api.react(room.id, message.id, '👍').catch(e => useStore.getState().setError(e)); }}>👍</button>
                   <button title="Переслать" aria-label="Переслать" onClick={() => setForward([message])}><Forward size={15}/></button>
                   <button title="Ещё действия" aria-label="Ещё действия" onClick={e => openMessageMenu(message,e)}>···</button>
-                  {mine && <>{!message.attachment && <button title="Редактировать" aria-label="Редактировать" onClick={() => { setEdit(message); setReply(null); setBody(message.body); }}><Pencil size={14}/></button>}<button title="Удалить" aria-label="Удалить" onClick={() => setDeleting(message)}><Trash2 size={14}/></button></>}
+                  {mine && <>{!message.attachment && <button title="Редактировать" aria-label="Редактировать" disabled={files.length>0} onClick={() => { setEdit(message); setReply(null); setBody(message.body); }}><Pencil size={14}/></button>}<button title="Удалить" aria-label="Удалить" onClick={() => setDeleting(message)}><Trash2 size={14}/></button></>}
                 </div></>}
               </article>
               </div>
@@ -300,24 +304,26 @@ function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSu
           })}
         </div>
         {pending.map(p => <div className="pending-wrap message-row outgoing" key={p.txn}><span className="message-avatar" role="img" aria-label="Мой аватар"><Avatar name={ownProfile?.displayName||session.userId} url={ownProfile?.avatarUrl??profiles?.[session.userId]?.avatarUrl} size="tiny"/></span><div className="bubble mine pending"><p>{p.body}</p><span className="message-meta">{p.status === 'failed' ? 'Не отправлено' : p.status === 'sent' ? <><CheckCheck size={13}/>На сервере, ждём синхронизации</> : 'Отправляем…'}</span>{p.status === 'failed' && <button className="text-button" onClick={() => { void useStore.getState().send(p.roomId, p.body, p.replyTo, p.txn).then(success => { if (success) { setBody(current => current === p.body ? '' : current); stick.current = true; } }); }}>Повторить</button>}</div></div>)}
+        <OutgoingFiles roomId={room.id}/>
         </div>
       </div>
       {(reply || edit) && <div className="composer-context"><Reply size={20}/><span><strong>{edit ? 'Редактирование' : 'Ответ'}</strong><small>{(edit ?? reply)?.body}</small></span><button className="icon-button" aria-label="Отменить ответ или редактирование" onClick={() => { if (edit) setBody(''); setEdit(null); setReply(null); }}><X size={17}/></button></div>}
-      {(files.length > 0 || hasTransfers) && <Uploads roomId={room.id} files={files} done={() => setFiles([])}/>}
       {recording && <VoiceRecorder roomId={room.id} close={() => setRecording(false)}/>}
       {emoji && <div className="emoji-picker">{['😀','🙂','😂','😍','🥰','😎','🤔','😢','👍','👎','❤️','🔥','🎉','🙏','✅','👀','💯','🤝','🚀','☕'].map(value => <button key={value} aria-label={`Вставить ${value}`} onClick={() => { setBody(current => current + value); setEmoji(false); }}>{value}</button>)}</div>}
+      {!canSend && <AttachedFiles roomId={room.id}/>}
       {!canSend && <div className="channel-readonly"><LockKeyhole size={16}/>В этой комнате публиковать сообщения могут только участники с правами на отправку.</div>}
       {canSend && <form className="composer" onSubmit={submit}>
-        <input type="file" multiple ref={fileInput} className="sr-only" aria-label="Файлы для отправки" onChange={e => { setFiles([...e.target.files || []]); e.target.value = ''; }}/>
-        <button type="button" className="icon-button" aria-label="Прикрепить файл" onClick={() => fileInput.current?.click()}><Paperclip size={22}/></button>
+        {!edit&&<AttachedFiles roomId={room.id}/>}
+        <input type="file" multiple ref={fileInput} className="sr-only" aria-label="Файлы для отправки" onChange={e=>{if(!edit)attachFiles(room.id,[...e.target.files||[]]);e.target.value='';}}/>
+        <button type="button" className="icon-button" aria-label="Прикрепить файл" disabled={!!edit} onClick={() => fileInput.current?.click()}><Paperclip size={22}/></button>
         <ComposerInput aria-label="Сообщение" placeholder="Написать сообщение…" value={body} rows={1} maxLength={16000} onChange={e => {
           setBody(e.target.value);
           if (Date.now() - typingAt.current > 5000) { typingAt.current = Date.now(); void api.typing(room.id, true).catch(() => {}); }
-        }} onPaste={e => { const pasted = [...e.clipboardData.files]; if (pasted.length) { e.preventDefault(); setFiles(pasted); } }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(e); } }}/>
-        <button type="button" className={`format-toggle ${markdown ? 'accent' : ''}`} title="Отправлять с форматированием Markdown" aria-label="Форматирование Markdown" aria-pressed={markdown} onClick={() => setMarkdown(!markdown)}>Aa</button>
+        }} onPaste={e => { const pasted = [...e.clipboardData.files]; if (pasted.length) { e.preventDefault();if(!edit)attachFiles(room.id,pasted); } }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(e); } }}/>
+        <button type="button" className={`format-toggle ${markdown&&!files.length ? 'accent' : ''}`} title="Отправлять с форматированием Markdown" aria-label="Форматирование Markdown" aria-pressed={markdown&&!files.length} disabled={files.length>0} onClick={() => setMarkdown(!markdown)}>Aa</button>
         <button type="button" className="icon-button" aria-label="Эмодзи" onClick={() => setEmoji(!emoji)}><Smile size={22}/></button>
-        {!body.trim() && <button type="button" className="icon-button" aria-label="Записать голосовое" onClick={() => setRecording(true)}><Mic size={22}/></button>}
-        <button type="submit" className="send-button" aria-label={edit ? 'Сохранить изменение' : 'Отправить'} disabled={!body.trim() || sending}>{edit ? <Check size={21}/> : <Send size={21}/>}</button>
+        {!body.trim()&&!files.length && <button type="button" className="icon-button" aria-label="Записать голосовое" onClick={() => setRecording(true)}><Mic size={22}/></button>}
+        <button type="submit" className="send-button" aria-label={edit ? 'Сохранить изменение' : 'Отправить'} disabled={sending||(!body.trim()&&(!!edit||!files.length))}>{edit ? <Check size={21}/> : <Send size={21}/>}</button>
       </form>}
     </>}
     {deleting && <Modal title="Удалить сообщение?" close={() => setDeleting(null)}><p>Сообщение будет удалено для участников комнаты через Matrix.</p><div className="modal-actions"><button className="text-button" onClick={() => setDeleting(null)}>Отмена</button><button className="danger" onClick={() => { void api.redact(room.id, deleting.id).then(() => setDeleting(null)).catch(e => useStore.getState().setError(e)); }}>Удалить</button></div></Modal>}
@@ -331,7 +337,7 @@ function ChatView({ room, showInfo, toggleInfo, openEncryption }: { room: RoomSu
         <button role="menuitem" onClick={()=>{void navigator.clipboard.writeText(context.message.body).then(()=>setContext(null)).catch(e=>useStore.getState().setError(e));}}><Copy size={18}/>Копировать текст</button>
         <button role="menuitem" onClick={()=>{setForward([context.message]);setContext(null);}}><Forward size={18}/>Переслать</button>
         {context.message.sender===session.userId && <>
-          {!context.message.attachment && <button role="menuitem" disabled={!canSend} onClick={()=>{setEdit(context.message);setReply(null);setBody(context.message.body);setContext(null);composerFocus();}}><Pencil size={18}/>Редактировать</button>}
+          {!context.message.attachment && <button role="menuitem" disabled={!canSend||files.length>0} onClick={()=>{setEdit(context.message);setReply(null);setBody(context.message.body);setContext(null);composerFocus();}}><Pencil size={18}/>Редактировать</button>}
           <button role="menuitem" className="context-delete" onClick={()=>{setDeleting(context.message);setContext(null);}}><Trash2 size={18}/>Удалить</button>
         </>}
         <button role="menuitem" onClick={()=>{setSelecting(true);selectMessage(context.message);setContext(null);}}><CircleCheck size={18}/>{selected.has(context.message.id)?'Снять выделение':'Выделить сообщение'}</button>

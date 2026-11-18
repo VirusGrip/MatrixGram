@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {api} from './api';
 import {MAX_FILE_BYTES,nativeTransferFile,type TransferFile} from './files';
 import { useStore } from './store';
-import { enqueueFiles } from './Transfers';
+import {attachFiles} from './Attachments';
 import { Avatar, Modal } from './ui';
 import { roomTitle } from './contacts';
 declare global { interface Window { matrixgramShareReady?: boolean; matrixgramBack?: () => boolean } }
@@ -45,5 +45,5 @@ export function useIncomingShare() {
     return () => { window.removeEventListener('matrixgram-share', handler);release(pending.current);pending.current=[]; delete window.matrixgramShareReady; delete window.matrixgramBack; };
   }, []);
   if (!session || !incoming) return null;
-  return <Modal title="Поделиться в MatrixGram" close={() => {release(pending.current);pending.current=[];setIncoming(null)}}><p className="share-preview">{incoming.text || incoming.files.map(file => file.name).join(', ')}</p><p className="muted">Выберите получателя. Будет отправлено файлов: {incoming.files.length}.</p><div className="forward-rooms">{rooms.filter(room => room.membership === 'joined').map(room => <button key={room.id} aria-label={`Отправить в ${roomTitle(room,names)}`} onClick={() => { const payload = incoming; pending.current=[];setIncoming(null); useStore.getState().select(room.id); if (payload.files.length) enqueueFiles(room.id, payload.files); if (payload.text) void useStore.getState().send(room.id, payload.text); }}><Avatar name={roomTitle(room,names)} url={room.avatarUrl} size="small"/>{roomTitle(room,names)}</button>)}</div></Modal>;
+  return <Modal title="Поделиться в MatrixGram" close={() => {release(pending.current);pending.current=[];setIncoming(null)}}><p className="share-preview">{incoming.text || incoming.files.map(file => file.name).join(', ')}</p><p className="muted">Выберите чат, затем добавьте текст и нажмите «Отправить». Файлов: {incoming.files.length}.</p><div className="forward-rooms">{rooms.filter(room => room.membership === 'joined').map(room => <button key={room.id} aria-label={`Прикрепить в ${roomTitle(room,names)}`} onClick={() => { const payload=incoming;if(!attachFiles(room.id,payload.files,payload.text))return;pending.current=[];setIncoming(null);useStore.getState().select(room.id); }}><Avatar name={roomTitle(room,names)} url={room.avatarUrl} size="small"/>{roomTitle(room,names)}</button>)}</div></Modal>;
 }

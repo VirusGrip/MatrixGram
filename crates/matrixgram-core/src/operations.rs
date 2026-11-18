@@ -145,6 +145,10 @@ pub struct Upload {
     pub mime: String,
     pub data: String,
     #[serde(default)]
+    pub caption: Option<String>,
+    #[serde(default)]
+    pub reply_to: Option<String>,
+    #[serde(default)]
     pub voice: bool,
     pub duration_ms: Option<u64>,
     pub txn: String,
@@ -665,6 +669,16 @@ impl Account {
                 "Файл должен быть не больше 25 МБ, имя — до 255 байт".into(),
             ));
         }
+        if let Some(caption) = upload
+            .caption
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            validate_body(caption)?;
+        }
+        if let Some(reply) = upload.reply_to.as_deref() {
+            event(reply)?;
+        }
         let bytes = STANDARD
             .decode(upload.data)
             .map_err(|_| CoreError::User("Некорректный файл".into()))?;
@@ -702,6 +716,17 @@ impl Account {
                     .await?;
                 let mut config = AttachmentConfig::new();
                 config.txn_id = Some(upload.txn.into());
+                config.caption = upload
+                    .caption
+                    .filter(|value| !value.trim().is_empty())
+                    .map(matrix_sdk::ruma::events::room::message::TextMessageEventContent::plain);
+                if let Some(reply) = upload.reply_to {
+                    config.extra_content =
+                        json!({"m.relates_to":{"m.in_reply_to":{"event_id":reply}}})
+                            .as_object()
+                            .cloned();
+                }
+
                 let size = matrix_sdk::ruma::UInt::new(bytes.len() as u64);
                 config.info = Some(if upload.voice {
                     AttachmentInfo::Voice(BaseAudioInfo {

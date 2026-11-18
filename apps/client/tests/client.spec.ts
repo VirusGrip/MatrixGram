@@ -257,7 +257,7 @@ test('file upload renders an image and saves authenticated media', async ({ page
   await login(page);
   await page.getByRole('button', { name: 'Открыть Команда Matrix' }).click();
   await page.getByLabel('Файлы для отправки').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64') });
-  await expect(page.getByText('Отправлено', { exact: true })).toBeVisible();
+  await page.getByRole('button',{name:'Отправить',exact:true}).click();
   const preview = page.getByRole('button', { name: 'Открыть изображение photo.png' });
   await expect(preview).toBeVisible();
   await preview.click();
@@ -364,12 +364,12 @@ test('file upload continues across chat navigation and is not enqueued twice', a
   const adapter=fixtureApi.replace('upload:async upload=>{', 'upload:async upload=>{window.__started=(window.__started||0)+1;await new Promise(resolve=>window.__finishUpload=resolve);');
   await login(page,adapter); await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
   await page.getByLabel('Файлы для отправки').setInputFiles({name:'background.txt',mimeType:'text/plain',buffer:Buffer.from('background upload')});
+  await page.getByRole('button',{name:'Отправить',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>(window as any).__started)).toBe(1);
   await page.getByRole('button',{name:'Открыть Закрытая комната'}).click();
   await page.evaluate(()=>(window as any).__finishUpload());
   await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
-  await expect(page.getByText('Отправлено',{exact:true})).toBeVisible();
-  expect(await page.evaluate(()=>(window as any).__uploads.length)).toBe(1);
+  await expect.poll(()=>page.evaluate(()=>(window as any).__uploads?.length||0)).toBe(1);
 });
 
 test('cancelled file upload stays cancelled when the native request settles', async ({ page }) => {
@@ -377,10 +377,11 @@ test('cancelled file upload stays cancelled when the native request settles', as
     .replace('cancelUpload:async()=>{}','cancelUpload:async()=>{window.__cancelled=true;window.__finishUpload?.()}');
   await login(page,adapter); await page.getByRole('button',{name:'Открыть Команда Matrix'}).click();
   await page.getByLabel('Файлы для отправки').setInputFiles({name:'cancel.txt',mimeType:'text/plain',buffer:Buffer.from('cancel me')});
+  await page.getByRole('button',{name:'Отправить',exact:true}).click();
   await expect(page.getByRole('button',{name:'Отменить cancel.txt'})).toBeVisible();
   await expect.poll(()=>page.evaluate(()=>typeof (window as any).__finishUpload)).toBe('function');
   await page.getByRole('button',{name:'Отменить cancel.txt'}).click();
-  await expect(page.getByText('Отменено',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('Отправка файла cancel.txt',{exact:true})).toHaveCount(0);
   expect(await page.evaluate(()=>(window as any).__cancelled)).toBe(true);
   await expect(page.getByText('Отправлено',{exact:true})).toHaveCount(0);
 });
@@ -408,8 +409,9 @@ test('Android share waits for a recipient and Back closes dialogs before chat na
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('matrixgram-share',{detail:{text:'Из другого приложения',files:[{name:'shared.txt',mime:'text/plain',data:btoa('shared bytes')}]}})));
   await expect(page.getByRole('dialog',{name:'Поделиться в MatrixGram'})).toBeVisible();
   expect(await page.evaluate(()=>(window as any).__uploads?.length||0)).toBe(0);
-  await page.getByRole('button',{name:'Отправить в Команда Matrix',exact:true}).click();
+  await page.getByRole('button',{name:'Прикрепить в Команда Matrix',exact:true}).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('button',{name:'Отправить',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>(window as any).__uploads?.length||0)).toBe(1);
   await page.getByRole('button',{name:'Настройки',exact:true}).click();
   expect(await page.evaluate(()=>window.matrixgramBack?.())).toBe(true);

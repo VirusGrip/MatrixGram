@@ -912,6 +912,8 @@ async fn attachment_upload_and_download_do_not_expose_access_tokens_to_ui() {
         .account
         .upload(
             Upload {
+                caption: Some("Подпись к файлу".into()),
+                reply_to: Some("$hello".into()),
                 room_id: Some("!test:example.org".into()),
                 name: "notes.txt".into(),
                 mime: "text/plain".into(),
@@ -948,6 +950,9 @@ async fn attachment_upload_and_download_do_not_expose_access_tokens_to_ui() {
         .unwrap();
     assert_eq!(send["url"], "mxc://example.org/document");
     assert_eq!(send["msgtype"], "m.file");
+    assert_eq!(send["body"], "Подпись к файлу");
+    assert_eq!(send["filename"], "notes.txt");
+    assert_eq!(send["m.relates_to"]["m.in_reply_to"]["event_id"], "$hello");
     Mock::given(method("GET"))
         .and(path_regex(
             r"/_matrix/client/v1/media/download/example.org/document$",
@@ -1009,6 +1014,8 @@ async fn encrypted_attachment_upload_is_ciphertext_and_sends_encrypted_event() {
     f.account
         .upload(
             Upload {
+                caption: None,
+                reply_to: None,
                 room_id: Some("!test:example.org".into()),
                 name: "voice.webm".into(),
                 mime: "audio/webm".into(),
@@ -1056,6 +1063,8 @@ async fn locked_encrypted_room_and_invalid_media_are_rejected_before_upload() {
         f.account
             .upload(
                 Upload {
+                    caption: None,
+                    reply_to: None,
                     room_id: Some("!test:example.org".into()),
                     name: "secret.txt".into(),
                     mime: "text/plain".into(),
@@ -1401,6 +1410,8 @@ async fn streaming_upload_checks_server_limit_and_locked_rooms_before_content() 
         .mount(&f.server)
         .await;
     let metadata = FileUpload {
+        caption: None,
+        reply_to: None,
         room_id: "!test:example.org".into(),
         name: "five-hundred-mib.bin".into(),
         mime: "application/octet-stream".into(),
@@ -1514,6 +1525,8 @@ async fn streaming_upload_preserves_plaintext_and_e2ee_room_contracts() {
         )
         .unwrap();
         let metadata = FileUpload {
+            caption: Some("Подпись большого файла".into()),
+            reply_to: None,
             room_id: "!test:example.org".into(),
             name: "stream.bin".into(),
             mime: "application/octet-stream".into(),
@@ -1551,6 +1564,14 @@ async fn streaming_upload_preserves_plaintext_and_e2ee_room_contracts() {
         } else {
             assert_eq!(content.body, marker);
             assert_eq!(
+                event.body_json::<Value>().unwrap()["body"],
+                "Подпись большого файла"
+            );
+            assert_eq!(
+                event.body_json::<Value>().unwrap()["filename"],
+                "stream.bin"
+            );
+            assert_eq!(
                 event.body_json::<Value>().unwrap()["url"],
                 "mxc://example.org/stream"
             );
@@ -1578,6 +1599,8 @@ async fn streaming_read_only_room_rejects_before_media_upload() {
     unencrypted_state(&f.server).await;
     streaming_power_levels(&f, 50).await;
     let metadata = FileUpload {
+        caption: None,
+        reply_to: None,
         room_id: "!test:example.org".into(),
         name: "file.bin".into(),
         mime: "application/octet-stream".into(),

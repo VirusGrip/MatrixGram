@@ -5,7 +5,6 @@ import { fileBase64 } from './files';
 import {INLINE_FILE_BYTES} from './files';
 import {downloadAttachment,useDownloads,downloadKey,cancelDownload} from './Downloads';
 export { fileBase64 } from './files';
-export { Uploads } from './Transfers';
 import { useStore } from './store';
 import type { Attachment } from './models';
 import { Modal, errorText } from './ui';
