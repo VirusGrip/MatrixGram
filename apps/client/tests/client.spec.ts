@@ -202,7 +202,8 @@ test('compact conversation groups senders, sits at the bottom, and opens details
   await page.getByRole('button', { name: 'Открыть Команда Matrix' }).click();
   await expect(page.locator('.message-list .bubble')).toHaveCount(7);
   await expect(page.locator('.message-list .sender')).toHaveCount(3);
-  await expect(page.locator('.message-avatar .avatar')).toHaveCount(3);
+  await expect(page.locator('.incoming .message-avatar .avatar')).toHaveCount(3);
+  await expect(page.locator('.outgoing .message-avatar .avatar')).toHaveCount(1);
   await expect(page.locator('.details')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Работа', exact: true })).toBeVisible();
   const last = page.locator('.message-slot').last();
