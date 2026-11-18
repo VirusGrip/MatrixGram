@@ -2,10 +2,10 @@ import { create } from 'zustand';
 import { api } from './api';
 import { mergeEvents } from './timeline';
 import { contactKey, readContactNames, type ContactNames } from './contacts';
-import type { MatrixEvent, RoomSummary, SessionInfo, Update, PendingMessage, EncryptionStatus, ChatFolder, SenderProfile, TimelinePage } from './models';
+import type { MatrixEvent, RoomSummary, SessionInfo, Update, PendingMessage, EncryptionStatus, ChatFolder, SenderProfile, TimelinePage, Profile } from './models';
 
 interface Store {
-  session: SessionInfo | null; rooms: RoomSummary[]; activeRoom: string | null;
+  session: SessionInfo | null; ownProfile: Profile | null; rooms: RoomSummary[]; activeRoom: string | null;
   events: Record<string, MatrixEvent[]>; cursors: Record<string, string | null>;
   profiles: Record<string, Record<string, SenderProfile>>; canSend: Record<string, boolean>;
   pending: PendingMessage[]; connection: string; error: string | null;
@@ -24,7 +24,7 @@ interface Store {
   send: (roomId: string, body: string, replyTo?: string, txn?: string) => Promise<boolean>;
   clear: () => void;
 }
-const empty = { session: null, rooms: [], activeRoom: null, events: {}, cursors: {}, profiles: {}, canSend: {}, pending: [], connection: 'connecting', error: null, encryption: { enabled: false, backupReady: false }, folders: [], typing: {}, receipts: {} };
+const empty = { session: null, ownProfile: null, rooms: [], activeRoom: null, events: {}, cursors: {}, profiles: {}, canSend: {}, pending: [], connection: 'connecting', error: null, encryption: { enabled: false, backupReady: false }, folders: [], typing: {}, receipts: {} };
 const historyRequests = new WeakMap<SessionInfo, Map<string, { promise: Promise<void>; encryption: EncryptionStatus }>>();
 const cacheRequests = new WeakMap<SessionInfo, Map<string, { promise: Promise<void>; encryption: EncryptionStatus }>>();
 const loadedPages = new WeakMap<SessionInfo, Map<string, { at: number; encryption: EncryptionStatus }>>();
@@ -40,7 +40,7 @@ function pageState(state: Store, pages: TimelinePage[]) {
 }
 export const useStore = create<Store>((set, get) => ({
   ...empty, contactNames: {},
-  setSession: session => set({ session, contactNames: session ? readContactNames(session) : {} }),
+  setSession: session => set({ session, ownProfile: null, contactNames: session ? readContactNames(session) : {} }),
   setContactName: (userId, name) => {
     const session = get().session; if (!session) return;
     if (!/^@[^:]+:.+$/.test(userId)) throw new Error('Некорректный Matrix ID');
