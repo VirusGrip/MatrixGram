@@ -1,0 +1,20 @@
+name: Set up pinned NSIS
+description: Fetch the NSIS archive used by Tauri without the Chocolatey metadata feed.
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $zip = Join-Path $env:RUNNER_TEMP 'matrixgram-nsis-3.11.zip'
+        $folder = Join-Path $env:RUNNER_TEMP 'matrixgram-nsis-3.11'
+        $expected = 'c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1'
+        $url = 'https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip'
+        Invoke-WebRequest -Uri $url -OutFile $zip -TimeoutSec 60 -MaximumRetryCount 3 -RetryIntervalSec 5
+        if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $expected) { throw 'NSIS archive checksum mismatch' }
+        Expand-Archive -LiteralPath $zip -DestinationPath $folder -Force
+        $compiler = Join-Path $folder 'nsis-3.11/makensis.exe'
+        if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) { throw 'NSIS compiler missing from the verified archive' }
+        & $compiler /VERSION
+        if ($LASTEXITCODE -ne 0) { throw 'NSIS compiler check failed' }
+        Add-Content -LiteralPath $env:GITHUB_PATH -Value (Split-Path -Parent $compiler) -Encoding utf8
