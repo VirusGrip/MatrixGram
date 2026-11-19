@@ -13,7 +13,12 @@ struct Snapshot {
 fn primary(event: &Value) -> bool {
     matches!(
         event["type"].as_str(),
-        Some("m.room.message" | "m.room.encrypted")
+        Some(
+            "m.room.message"
+                | "m.room.encrypted"
+                | "org.matrix.msc3381.poll.start"
+                | "m.poll.start"
+        )
     ) && event["content"]["m.relates_to"]["rel_type"] != "m.replace"
 }
 fn retained(existing: Vec<Value>, incoming: &[Value]) -> Vec<Value> {
@@ -24,7 +29,7 @@ fn retained(existing: Vec<Value>, incoming: &[Value]) -> Vec<Value> {
         };
         if events.get(&id).is_some_and(|old| {
             old["unsigned"]["redacted_because"].is_object()
-                || old["type"] == "m.room.message" && event["type"] == "m.room.encrypted"
+                || old["type"] != "m.room.encrypted" && event["type"] == "m.room.encrypted"
         }) {
             continue;
         }

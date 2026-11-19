@@ -131,6 +131,18 @@ pub enum Operation {
         event_type: String,
         content: Value,
     },
+    PollPage {
+        room_id: String,
+        event_id: String,
+        from: Option<String>,
+    },
+    PollVote {
+        room_id: String,
+        event_id: String,
+        answers: Vec<String>,
+        txn: String,
+        revision: Option<String>,
+    },
     Turn,
     ExportKeys {
         passphrase: String,
@@ -205,6 +217,21 @@ fn power_number(value: matrix_sdk::ruma::events::room::power_levels::UserPowerLe
 impl Account {
     pub async fn operation(&self, operation: Operation) -> Result<Value> {
         match operation {
+            Operation::PollPage {
+                room_id,
+                event_id,
+                from,
+            } => self.poll_page(&room_id, &event_id, from).await,
+            Operation::PollVote {
+                room_id,
+                event_id,
+                answers,
+                txn,
+                revision,
+            } => {
+                self.poll_vote(&room_id, &event_id, answers, &txn, revision.as_deref())
+                    .await
+            }
             Operation::Profile { user_id } => {
                 let id = user(user_id.as_deref().unwrap_or(&self.info.user_id))?;
                 let profile = self

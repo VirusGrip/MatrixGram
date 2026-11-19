@@ -7,6 +7,7 @@ mod local_history;
 pub mod models;
 pub mod operations;
 pub mod policy;
+mod polls;
 mod vault;
 #[cfg(target_os = "android")]
 pub use vault::{

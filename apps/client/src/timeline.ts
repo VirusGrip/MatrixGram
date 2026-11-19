@@ -1,4 +1,5 @@
 import type { MatrixEvent, Message } from './models';
+import {parsePoll,pollStart,pollText} from './polls';
 
 function object(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
@@ -15,7 +16,7 @@ export function mergeEvents(existing: MatrixEvent[], incoming: MatrixEvent[]): M
     const previous = map.get(event.event_id);
     // A later history page must never restore already redacted content.
     if (previous?.unsigned?.redacted_because && !event.unsigned?.redacted_because) continue;
-    if (event.type === 'm.room.encrypted' && previous?.type === 'm.room.message' && !event.unsigned?.redacted_because) continue;
+    if (event.type === 'm.room.encrypted' && previous && (previous.type === 'm.room.message'||pollStart(previous.type)||previous.type.endsWith('poll.response')||previous.type.endsWith('poll.end')) && !event.unsigned?.redacted_because) continue;
     map.set(event.event_id, event);
   }
   return [...map.values()].sort((a, b) => a.origin_server_ts - b.origin_server_ts || a.event_id.localeCompare(b.event_id));
@@ -34,12 +35,14 @@ export function projectTimeline(events: MatrixEvent[]): Message[] {
   for (const event of sorted) {
     const c = object(event.content);
     const rel = object(c['m.relates_to']);
-    if (event.type !== 'm.room.message' && event.type !== 'm.room.encrypted') continue;
+    if (event.type !== 'm.room.message' && event.type !== 'm.room.encrypted' && !pollStart(event.type)) continue;
     if (rel.rel_type === 'm.replace') continue;
     const encrypted = event.type === 'm.room.encrypted';
+    const poll=pollStart(event.type)?parsePoll(c):undefined;
     messages.set(event.event_id, {
       id: event.event_id, sender: event.sender, ts: event.origin_server_ts,
-      body: encrypted ? 'Ключ для этого сообщения пока не найден. Подключите ключи сбоку и обновите историю.' : text(c.body) || 'Неподдерживаемое сообщение',
+      body: encrypted ? 'Ключ для этого сообщения пока не найден. Подключите ключи сбоку и обновите историю.' : poll?.question||text(c.body)||pollText(c)||(pollStart(event.type)?'Не удалось прочитать опрос':'Неподдерживаемое сообщение'),
+      poll,
       encrypted, deleted: redacted.has(event.event_id), edited: false,
       replyTo: text(object(rel['m.in_reply_to']).event_id) || undefined,
       reactions: [],
@@ -59,7 +62,8 @@ export function projectTimeline(events: MatrixEvent[]): Message[] {
     const c = object(event.content), rel = object(c['m.relates_to']);
     const target = messages.get(text(rel.event_id));
     if (!target || target.deleted || target.encrypted) continue;
-    if (event.type === 'm.room.message' && rel.rel_type === 'm.replace' && event.sender === target.sender) {
+    if(pollStart(event.type)&&target.poll&&rel.rel_type==='m.replace'&&event.sender===target.sender){const replacement=parsePoll(c['m.new_content']);if(replacement){target.poll={...replacement,revision:event.event_id};target.body=replacement.question;target.edited=true;}}
+    if (event.type === 'm.room.message' && !target.poll && rel.rel_type === 'm.replace' && event.sender === target.sender) {
       const body = object(c['m.new_content']).body;
       if (typeof body === 'string') { if(target.attachment)target.attachment={...target.attachment,caption:body!==target.attachment.name?body:undefined}; target.body = body; target.edited = true; target.formattedBody = text(object(c['m.new_content']).formatted_body) || undefined; }
     }
@@ -72,5 +76,5 @@ export function projectTimeline(events: MatrixEvent[]): Message[] {
       else target.reactions.push({ key: rel.key, count: users.size });
     }
   }
-  return [...messages.values()].map(message => message.deleted ? { ...message, body: 'Сообщение удалено', reactions: [], replyTo: undefined, attachment: undefined, formattedBody: undefined } : message);
+  return [...messages.values()].map(message => message.deleted ? { ...message, body: 'Сообщение удалено', reactions: [], replyTo: undefined, attachment: undefined, poll:undefined, formattedBody: undefined } : message);
 }

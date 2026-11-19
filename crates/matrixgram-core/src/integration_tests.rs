@@ -4,6 +4,118 @@ use wiremock::{
     matchers::{method, path, path_regex},
 };
 
+#[tokio::test]
+async fn poll_page_and_vote_use_matrix_relations_and_encrypt_when_required() {
+    use crate::operations::Operation;
+    let poll = json!({"event_id":"$poll","room_id":"!test:example.org","type":"org.matrix.msc3381.poll.start","sender":"@bob:example.org","origin_server_ts":100,"content":{"org.matrix.msc3381.poll.start":{"question":{"org.matrix.msc1767.text":"Обед?"},"max_selections":1,"answers":[{"id":"pizza","org.matrix.msc1767.text":"Пицца"},{"id":"soup","org.matrix.msc1767.text":"Суп"}]}}});
+    for encrypted in [false, true] {
+        let f = fixture(encrypted).await;
+        if encrypted {
+            f.account.enable_encryption().await.unwrap();
+            Mock::given(method("GET"))
+                .and(path_regex(
+                    r"/_matrix/client/v3/rooms/.*/state/m.room.encryption/?$",
+                ))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(json!({"algorithm":"m.megolm.v1.aes-sha2"})),
+                )
+                .mount(&f.server)
+                .await;
+            Mock::given(method("GET")).and(path_regex(r"/_matrix/client/v3/rooms/.*/members$"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"chunk":[{"type":"m.room.member","state_key":"@alice:example.org","sender":"@alice:example.org","event_id":"$m","origin_server_ts":2,"content":{"membership":"join"}}]}))).mount(&f.server).await;
+        } else {
+            unencrypted_state(&f.server).await;
+        }
+        Mock::given(method("GET"))
+            .and(path_regex(r"/_matrix/client/v3/rooms/.*/event/.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(poll.clone()))
+            .mount(&f.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/_matrix/client/v1/rooms/.*/relations/.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"chunk":[]})))
+            .mount(&f.server)
+            .await;
+        let send_type = if encrypted {
+            "m.room.encrypted"
+        } else {
+            "org.matrix.msc3381.poll.response"
+        };
+        Mock::given(method("PUT"))
+            .and(path_regex(format!(
+                r"/_matrix/client/v3/rooms/.*/send/{send_type}/poll-txn$"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"event_id":"$vote"})))
+            .mount(&f.server)
+            .await;
+        let page = f
+            .account
+            .operation(Operation::PollPage {
+                room_id: "!test:example.org".into(),
+                event_id: "$poll".into(),
+                from: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(page["events"][0], poll);
+        assert_eq!(page["canVote"], true);
+        assert!(
+            f.account
+                .cached_page("!test:example.org")
+                .await
+                .unwrap()
+                .events
+                .iter()
+                .any(|e| e["event_id"] == "$poll")
+        );
+        let make_vote = |answers: Vec<String>| Operation::PollVote {
+            room_id: "!test:example.org".into(),
+            event_id: "$poll".into(),
+            answers,
+            txn: "poll-txn".into(),
+            revision: None,
+        };
+        assert!(
+            f.account
+                .operation(make_vote(vec!["unknown".into()]))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            f.account
+                .operation(make_vote(vec!["pizza".into()]))
+                .await
+                .unwrap(),
+            "$vote"
+        );
+        let requests = f.server.received_requests().await.unwrap();
+        let sent = requests
+            .iter()
+            .find(|r| r.url.path().ends_with("/poll-txn"))
+            .unwrap();
+        let content = sent.body_json::<Value>().unwrap();
+        if encrypted {
+            assert!(content["ciphertext"].is_string());
+            assert!(!String::from_utf8_lossy(&sent.body).contains("pizza"));
+        } else {
+            assert_eq!(
+                content["org.matrix.msc3381.poll.response"]["answers"],
+                json!(["pizza"])
+            );
+            assert_eq!(content["m.relates_to"]["event_id"], "$poll");
+        }
+        Mock::given(method("GET")).and(path_regex(r"/_matrix/client/v1/rooms/.*/relations/.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"chunk":[{"event_id":"$end","room_id":"!test:example.org","type":"org.matrix.msc3381.poll.end","sender":"@bob:example.org","origin_server_ts":200,"content":{"m.relates_to":{"rel_type":"m.reference","event_id":"$poll"},"org.matrix.msc3381.poll.end":{}}}]}))).with_priority(1).mount(&f.server).await;
+        assert!(
+            f.account
+                .operation(make_vote(vec!["soup".into()]))
+                .await
+                .is_err()
+        );
+    }
+}
+
 struct Fixture {
     server: MockServer,
     account: Account,

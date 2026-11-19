@@ -27,6 +27,7 @@ export interface Message {
   encrypted: boolean; replyTo?: string; reactions: { key: string; count: number }[];
   formattedBody?: string;
   attachment?: Attachment;
+  poll?: import('./polls').Poll;
 }
 export interface Attachment { caption?: string; kind: string; name: string; mime: string; size?: number; source: Record<string, unknown>; duration?: number; voice?: boolean }
 export interface Member { userId: string; name: string; avatarUrl?: string; power: number; membership: string }
