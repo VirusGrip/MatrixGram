@@ -16,6 +16,7 @@ import { DesktopPreferences, notifyMessages } from './SettingsExtras';
 import { CallService } from './Calls';
 import { ChatMenu } from './ChatMenu';
 import { useMessagePress } from './useMessagePress';
+import {PollView,PollService} from './PollView';
 import { Accounts } from './Accounts';
 import {TransferService,OutgoingFiles,enqueueFiles} from './Transfers';
 import {AttachedFiles,attachFiles,takeAttachments,takeSharedText,useAttachments} from './Attachments';
@@ -69,7 +70,7 @@ function Login({ loading }: { loading: boolean }) {
       <p className="login-note"><KeyRound size={17}/>Зашифрованные комнаты можно открыть после входа.<br/>Восстановление ключей необязательно.</p>
       {!loading && nativeAvailable() && <Accounts savedOnly/>}
     </section>
-    <footer>MatrixGram · 0.5.10 · ранняя версия</footer>
+    <footer>MatrixGram · 0.5.11 · ранняя версия</footer>
   </main>;
 }
 
@@ -291,15 +292,16 @@ function ChatView({ room, toggleInfo, openEncryption }: { room: RoomSummary; sho
               <article className={`bubble ${mine ? 'mine' : ''} ${message.deleted ? 'deleted' : ''} ${highlight === message.id ? 'highlight' : ''}`} onPointerDown={event=>{if(!selecting)messagePress.begin(event,target=>setContext({...target,message}));}} onPointerMove={messagePress.move} onPointerUp={messagePress.cancel} onPointerCancel={messagePress.cancel} onClickCapture={messagePress.click} onClick={e => { if (selecting && !(e.target as HTMLElement).closest('button,a,input,audio,video')) selectMessage(message); }} tabIndex={0} onContextMenu={e => openMessageMenu(message,e)} aria-label={`Сообщение от ${message.sender}`}>
                 {!mine && !joinsPrevious && <button className="sender" onClick={() => setPerson(message.sender)}>{sender}</button>}
                 {message.replyTo && <blockquote>{messagesById.get(message.replyTo)?.body ?? 'Ответ на более раннее сообщение'}</blockquote>}
+                {message.poll && <PollView roomId={room.id} message={message}/>}
                 {message.attachment && <MediaView attachment={message.attachment}/>}
-                <div className="message-body"><div className="message-text">{(!message.attachment||message.attachment.caption)&&<FormattedText html={message.formattedBody} fallback={message.attachment?.caption??message.body} onMention={setPerson}/>}</div><span className="message-meta">{message.edited && 'изменено · '}{time(message.ts)}{mine && (readThrough >= message.ts ? <CheckCheck size={14} aria-label="Прочитано"/> : <Check size={14} aria-label="Отправлено на сервер"/>)}</span></div>
+                <div className="message-body"><div className="message-text">{!message.poll&&(!message.attachment||message.attachment.caption)&&<FormattedText html={message.formattedBody} fallback={message.attachment?.caption??message.body} onMention={setPerson}/>}</div><span className="message-meta">{message.edited && 'изменено · '}{time(message.ts)}{mine && (readThrough >= message.ts ? <CheckCheck size={14} aria-label="Прочитано"/> : <Check size={14} aria-label="Отправлено на сервер"/>)}</span></div>
                 {message.reactions.length > 0 && <div className="reactions">{message.reactions.map(r => <span key={r.key}>{r.key} {r.count}</span>)}</div>}
                 {!selecting && !message.deleted && !message.encrypted && <><div className="message-actions">
                   <button title="Ответить" aria-label="Ответить" onClick={() => { setReply(message); setEdit(null); }}><Reply size={15}/></button>
                   <button title="Реакция 👍" aria-label="Реакция 👍" onClick={() => { void api.react(room.id, message.id, '👍').catch(e => useStore.getState().setError(e)); }}>👍</button>
-                  <button title="Переслать" aria-label="Переслать" onClick={() => setForward([message])}><Forward size={15}/></button>
+                  <button title="Переслать" aria-label="Переслать" disabled={!!message.poll} onClick={() => setForward([message])}><Forward size={15}/></button>
                   <button title="Ещё действия" aria-label="Ещё действия" onClick={e => openMessageMenu(message,e)}>···</button>
-                  {mine && <>{!message.attachment && <button title="Редактировать" aria-label="Редактировать" disabled={files.length>0} onClick={() => { setEdit(message); setReply(null); setBody(message.body); }}><Pencil size={14}/></button>}<button title="Удалить" aria-label="Удалить" onClick={() => setDeleting(message)}><Trash2 size={14}/></button></>}
+                  {mine && <>{!message.attachment&&!message.poll && <button title="Редактировать" aria-label="Редактировать" disabled={files.length>0} onClick={() => { setEdit(message); setReply(null); setBody(message.body); }}><Pencil size={14}/></button>}<button title="Удалить" aria-label="Удалить" onClick={() => setDeleting(message)}><Trash2 size={14}/></button></>}
                 </div></>}
               </article>
               </div>
@@ -338,9 +340,9 @@ function ChatView({ room, toggleInfo, openEncryption }: { room: RoomSummary; sho
         <button role="menuitem" disabled={!canSend} onClick={()=>{setReply(context.message);setEdit(null);setContext(null);composerFocus();}}><Reply size={18}/>Ответить</button>
         <button role="menuitem" onClick={()=>{void api.op('pin',{roomId:room.id,eventId:context.message.id,pinned:true}).then(()=>setContext(null)).catch(e=>useStore.getState().setError(e));}}><Pin size={18}/>Закрепить</button>
         <button role="menuitem" onClick={()=>{void navigator.clipboard.writeText(context.message.body).then(()=>setContext(null)).catch(e=>useStore.getState().setError(e));}}><Copy size={18}/>Копировать текст</button>
-        <button role="menuitem" onClick={()=>{setForward([context.message]);setContext(null);}}><Forward size={18}/>Переслать</button>
+        <button role="menuitem" disabled={!!context.message.poll} onClick={()=>{setForward([context.message]);setContext(null);}}><Forward size={18}/>Переслать</button>
         {context.message.sender===session.userId && <>
-          {!context.message.attachment && <button role="menuitem" disabled={!canSend||files.length>0} onClick={()=>{setEdit(context.message);setReply(null);setBody(context.message.body);setContext(null);composerFocus();}}><Pencil size={18}/>Редактировать</button>}
+          {!context.message.attachment&&!context.message.poll && <button role="menuitem" disabled={!canSend||files.length>0} onClick={()=>{setEdit(context.message);setReply(null);setBody(context.message.body);setContext(null);composerFocus();}}><Pencil size={18}/>Редактировать</button>}
           <button role="menuitem" className="context-delete" onClick={()=>{setDeleting(context.message);setContext(null);}}><Trash2 size={18}/>Удалить</button>
         </>}
         <button role="menuitem" onClick={()=>{setSelecting(true);selectMessage(context.message);setContext(null);}}><CircleCheck size={18}/>{selected.has(context.message.id)?'Снять выделение':'Выделить сообщение'}</button>
@@ -454,6 +456,7 @@ export default function App() {
     {directoryOpen && <RoomDirectory close={() => setDirectoryOpen(false)}/>}
     <CallService/>
     <TransferService/>
+    <PollService/>
     <RoomPreviews/>
     {incomingShare}
   </main>;
