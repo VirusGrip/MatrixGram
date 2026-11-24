@@ -9,6 +9,7 @@ use std::{sync::Arc, time::Duration};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::{Mutex, RwLock};
 mod accounts;
+mod desktop_indicators;
 mod file_transfers;
 mod memory_usage;
 #[cfg_attr(mobile, allow(dead_code))]
@@ -64,6 +65,7 @@ impl Backend {
             worker.abort();
         }
         let info = account.info.clone();
+        desktop_indicators::set_count(&app, 0);
         *self.account.write().await = Some(account.clone());
         let session_key = format!("{}|{}", info.user_id, info.device_id);
         let worker = tauri::async_runtime::spawn(async move {
@@ -71,6 +73,7 @@ impl Backend {
             loop {
                 match account.sync_once().await {
                     Ok(update) => {
+                        desktop_indicators::update(&app, &update.rooms);
                         delay = 2;
                         let _ = app.emit(
                             "matrix-update",
@@ -201,6 +204,7 @@ async fn logout(app: tauri::AppHandle, state: State<'_, Backend>) -> Result<(), 
         worker.abort();
     }
     *state.account.write().await = None;
+    desktop_indicators::set_count(&app, 0);
     if let Some(id) = state.current_profile.lock().await.take() {
         state.profiles.lock().await.remove(&id);
         let root = data_dir(&app)?;
@@ -794,8 +798,21 @@ pub fn run() {
                 let quit =
                     MenuItem::with_id(app, "quit", "Завершить MatrixGram", true, None::<&str>)?;
                 let menu = Menu::with_items(app, &[&show, &quit])?;
-                let mut tray = TrayIconBuilder::new()
+                let mut tray = TrayIconBuilder::with_id("matrixgram")
                     .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_tray_icon_event(|tray, event| {
+                        if matches!(
+                            event,
+                            tauri::tray::TrayIconEvent::Click {
+                                button: tauri::tray::MouseButton::Left,
+                                button_state: tauri::tray::MouseButtonState::Up,
+                                ..
+                            }
+                        ) {
+                            notifications::focus(tray.app_handle());
+                        }
+                    })
                     .tooltip("MatrixGram")
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "show" => {
@@ -814,6 +831,17 @@ pub fn run() {
                 tray.build(app)?;
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            #[cfg(desktop)]
+            if window.label() == "main"
+                && let tauri::WindowEvent::CloseRequested { api, .. } = event
+            {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            #[cfg(mobile)]
+            let _ = (window, event);
         })
         .manage(Backend::default())
         .manage(updates::Updates::default())

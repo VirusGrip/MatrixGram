@@ -38,7 +38,7 @@ export const api = {
   saveFolders: (folders: ChatFolder[]) => invoke<ChatFolder[]>('save_folders', { folders }),
   searchUsers: (term: string) => invoke<UserSearchResult>('search_users', { term }),
   openDirect: (userId: string) => invoke<string>('open_direct', { userId }),
-  op: <T = unknown>(kind: string, args: Record<string, unknown> = {}) => invoke<T>('client_operation', { operation: { kind, ...args } }),
+  op: <T = unknown>(kind: string, args: Record<string, unknown> = {}) => invoke<T>('client_operation', { operation: { kind, ...args } }).then(value=>{if(kind==='pin')window.dispatchEvent(new CustomEvent('matrixgram-pins',{detail:args.roomId}));return value;}),
   media: (source: Record<string, unknown>) => invoke<{ data: string }>('fetch_media', { source }),
   fileTransferLimits: () => invoke<{clientBytes:number;serverBytes:number;effectiveBytes:number}>('file_transfer_limits'),
   beginFileUpload: (upload:Record<string,unknown>,sessionKey:string) => invoke<void>('begin_file_upload',{upload,sessionKey}),

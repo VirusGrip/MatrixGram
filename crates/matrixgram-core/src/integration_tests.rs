@@ -441,7 +441,8 @@ async fn state_only_sync_updates_sender_name_and_permissions_without_a_new_messa
     response["rooms"]["join"]["!test:example.org"]["timeline"]["events"] = json!([]);
     response["rooms"]["join"]["!test:example.org"]["state"]["events"] = json!([
         {"type":"m.room.member","state_key":"@alice:example.org","sender":"@alice:example.org","event_id":"$renamed","origin_server_ts":20,"content":{"membership":"join","displayname":"Алиса Новая","avatar_url":"mxc://example.org/new"}},
-        {"type":"m.room.power_levels","state_key":"","sender":"@alice:example.org","event_id":"$powers","origin_server_ts":21,"content":{"users":{"@alice:example.org":0},"events":{"m.room.message":50}}}
+        {"type":"m.room.power_levels","state_key":"","sender":"@alice:example.org","event_id":"$powers","origin_server_ts":21,"content":{"users":{"@alice:example.org":0},"events":{"m.room.message":50}}},
+        {"type":"m.room.pinned_events","state_key":"","sender":"@alice:example.org","event_id":"$pins","origin_server_ts":22,"content":{"pinned":["$hello"]}}
     ]);
     Mock::given(method("GET"))
         .and(path("/_matrix/client/v3/sync"))
@@ -452,7 +453,9 @@ async fn state_only_sync_updates_sender_name_and_permissions_without_a_new_messa
     let update = f.account.sync_once().await.unwrap();
     assert_eq!(update.timelines.len(), 1);
     let page = &update.timelines[0];
-    assert!(page.events.is_empty());
+    assert_eq!(page.events.len(), 1);
+    assert_eq!(page.events[0]["type"], "m.room.pinned_events");
+    assert_eq!(page.events[0]["content"]["pinned"], json!(["$hello"]));
     assert_eq!(page.profiles[0].name, "Алиса Новая");
     assert_eq!(
         page.profiles[0].avatar_url.as_deref(),

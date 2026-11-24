@@ -17,6 +17,8 @@ import { CallService } from './Calls';
 import { ChatMenu } from './ChatMenu';
 import { useMessagePress } from './useMessagePress';
 import {PollView,PollService} from './PollView';
+import {EmojiPanel} from './EmojiPanel';
+import {PinnedBar} from './PinnedBar';
 import { Accounts } from './Accounts';
 import {TransferService,OutgoingFiles,enqueueFiles} from './Transfers';
 import {AttachedFiles,attachFiles,takeAttachments,takeSharedText,useAttachments} from './Attachments';
@@ -70,7 +72,7 @@ function Login({ loading }: { loading: boolean }) {
       <p className="login-note"><KeyRound size={17}/>Зашифрованные комнаты можно открыть после входа.<br/>Восстановление ключей необязательно.</p>
       {!loading && nativeAvailable() && <Accounts savedOnly/>}
     </section>
-    <footer>MatrixGram · 0.5.11 · ранняя версия</footer>
+    <footer>MatrixGram · 0.5.12 · ранняя версия</footer>
   </main>;
 }
 
@@ -149,6 +151,7 @@ function ChatView({ room, toggleInfo, openEncryption }: { room: RoomSummary; sho
   }
   useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !document.querySelector('dialog[open]')) clearSelection(); }; if (selecting) window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape); }, [selecting]);
   const fileInput = useRef<HTMLInputElement>(null);
+  const emojiTrigger=useRef<HTMLButtonElement>(null);
   const files=useAttachments(s=>s.files[room.id])??[];
   const incomingText=useAttachments(s=>s.text[room.id]);
   const profiles = useStore(s => s.profiles[room.id]);
@@ -269,6 +272,11 @@ function ChatView({ room, toggleInfo, openEncryption }: { room: RoomSummary; sho
       </div>
       <ChatMenu room={room} blocked={blocked} openEncryption={openEncryption} openSearch={()=>setSearchOpen(true)} openInfo={toggleInfo} format={{enabled:markdown,disabled:files.length>0||!canSend,toggle:()=>setMarkdown(!markdown)}}/>
     </header>}
+    {!blocked&&room.membership==='joined'&&<PinnedBar roomId={room.id} locate={(id,event)=>{
+      setHighlight(id);const index=filtered.findIndex(message=>message.id===id);stick.current=false;initialScroll.current=false;
+      if(index>=0)rows.scrollToIndex(index,{align:'center'});
+      else{focusMessage.current=id;setFind('');if(event)useStore.setState(state=>({events:{...state.events,[room.id]:mergeEvents(state.events[room.id]??[],[event])}}));}
+    }}/>}
     {selecting && <div className="selection-toolbar" role="toolbar" aria-label="Выбранные сообщения"><strong>Выбрано: {selectedMessages.length} / 100</strong><button className="text-button" aria-label="Выделить загруженные" onClick={() => setSelected(new Set(eligible.slice(0,100).map(message => message.id)))}><CheckCheck size={17}/><span>Выделить загруженные</span></button><button className="text-button" aria-label="Переслать выбранные" disabled={!selectedMessages.length} onClick={() => setForward(selectedMessages)}><Forward size={17}/><span>Переслать выбранные</span></button><button className="icon-button" aria-label="Отменить выделение" onClick={clearSelection}><X size={19}/></button></div>}
     {searchOpen && <div className="chat-search"><Search size={17}/><input autoFocus placeholder="Поиск в загруженной истории" value={find} onChange={e => setFind(e.target.value)}/>{room.encryption !== 'encrypted' && <button className="text-button" disabled={find.trim().length < 2} onClick={() => setServerSearch(true)}>Вся история</button>}<button className="icon-button" aria-label="Закрыть поиск" onClick={() => { setSearchOpen(false); setFind(''); }}><X size={18}/></button></div>}
     {room.membership === 'invited' ? <div className="chat-state"><Users size={42}/><h2>Приглашение в комнату</h2><p>{room.name}</p>{room.inviter && <p>{userTitle(room.inviter.userId, room.inviter.name, contactNames)} приглашает вас</p>}<button className="primary" disabled={inviteBusy} onClick={() => { void respondToInvite(true); }}>Вступить</button><button className="text-button" disabled={inviteBusy} onClick={() => { void respondToInvite(false); }}>Отклонить приглашение</button></div> : blocked ? <div className="chat-state"><LockKeyhole size={44}/><h2>Зашифрованная комната</h2><p>Откройте доступные сообщения сейчас.<br/>Ключи для старой истории можно подключить позже.</p><button className="primary" onClick={openEncryption}>Открыть зашифрованные комнаты</button></div> : <>
@@ -314,7 +322,7 @@ function ChatView({ room, toggleInfo, openEncryption }: { room: RoomSummary; sho
       </div>
       {(reply || edit) && <div className="composer-context"><Reply size={20}/><span><strong>{edit ? 'Редактирование' : 'Ответ'}</strong><small>{(edit ?? reply)?.body}</small></span><button className="icon-button" aria-label="Отменить ответ или редактирование" onClick={() => { if (edit) setBody(''); setEdit(null); setReply(null); }}><X size={17}/></button></div>}
       {recording && <VoiceRecorder roomId={room.id} close={() => setRecording(false)}/>}
-      {emoji && <div className="emoji-picker">{['😀','🙂','😂','😍','🥰','😎','🤔','😢','👍','👎','❤️','🔥','🎉','🙏','✅','👀','💯','🤝','🚀','☕'].map(value => <button key={value} aria-label={`Вставить ${value}`} onClick={() => { setBody(current => current + value); setEmoji(false); }}>{value}</button>)}</div>}
+      {emoji && <EmojiPanel trigger={emojiTrigger} close={()=>setEmoji(false)} select={value=>{const input=document.querySelector<HTMLTextAreaElement>('.composer textarea');const start=input?.selectionStart??body.length,end=input?.selectionEnd??body.length;setBody(current=>current.slice(0,start)+value+current.slice(end));requestAnimationFrame(()=>{input?.focus();input?.setSelectionRange(start+value.length,start+value.length);});}}/>}
       {!canSend && <AttachedFiles roomId={room.id}/>}
       {!canSend && <div className="channel-readonly"><LockKeyhole size={16}/>В этой комнате публиковать сообщения могут только участники с правами на отправку.</div>}
       {canSend && <form className="composer" onSubmit={submit}>
@@ -326,7 +334,7 @@ function ChatView({ room, toggleInfo, openEncryption }: { room: RoomSummary; sho
           if (Date.now() - typingAt.current > 5000) { typingAt.current = Date.now(); void api.typing(room.id, true).catch(() => {}); }
         }} onPaste={e => { const pasted = [...e.clipboardData.files]; if (pasted.length) { e.preventDefault();if(!edit)attachFiles(room.id,pasted); } }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(e); } }}/>
         <button type="button" className={`format-toggle ${markdown&&!files.length ? 'accent' : ''}`} title="Отправлять с форматированием Markdown" aria-label="Форматирование Markdown" aria-pressed={markdown&&!files.length} disabled={files.length>0} onClick={() => setMarkdown(!markdown)}>Aa</button>
-        <button type="button" className="icon-button emoji-button" aria-label="Эмодзи" onClick={() => setEmoji(!emoji)}><Smile size={22}/></button>
+        <button ref={emojiTrigger} type="button" className="icon-button emoji-button" aria-label="Эмодзи" aria-haspopup="dialog" aria-expanded={emoji} onClick={() => setEmoji(!emoji)}><Smile size={22}/></button>
         {!body.trim()&&!files.length && <button type="button" className="icon-button voice-button" aria-label="Записать голосовое" onClick={() => setRecording(true)}><Mic size={22}/></button>}
         <button type="submit" className={`send-button ${!body.trim()&&!files.length&&!edit?'empty-send':''}`} aria-label={edit ? 'Сохранить изменение' : 'Отправить'} disabled={sending||(!body.trim()&&(!!edit||!files.length))}>{edit ? <Check size={21}/> : <Send size={21}/>}</button>
       </form>}

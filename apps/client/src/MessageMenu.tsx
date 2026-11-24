@@ -1,6 +1,7 @@
 import {useLayoutEffect, useEffect, useRef, useState, type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import {ChevronDown} from 'lucide-react';
+import {EmojiChoices} from './EmojiPanel';
 export interface MessageMenuTarget {x: number; y: number; anchor: HTMLElement}
 
 export function MessageMenu({target, close, react, children}: {target: MessageMenuTarget; close: () => void; react: (emoji: string) => void; children: ReactNode}) {
@@ -45,6 +46,7 @@ export function MessageMenu({target, close, react, children}: {target: MessageMe
       {(expanded?['❤️','😂','😁','👍','🔥','🎉','😢','👀','🙏']:['❤️','😂','😁','👍','🔥']).map(emoji=><button key={emoji} role="menuitem" aria-label={`Реакция ${emoji}`} onClick={()=>react(emoji)}>{emoji}</button>)}
       <button role="menuitem" aria-label={expanded?'Скрыть реакции':'Ещё реакции'} aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}><ChevronDown size={18}/></button>
     </div>
+    {expanded&&<div className="context-catalogue"><EmojiChoices select={react}/></div>}
     <div className="context-actions">{children}</div>
   </div>, document.body);
 }
