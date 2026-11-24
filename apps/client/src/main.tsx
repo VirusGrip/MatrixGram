@@ -9,5 +9,6 @@ import './messenger.css';
 import './extras.css';
 import './mobile-chat.css';
 import './polls.css';
+import './chat-enhancements.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App /><UpdateNotice/><NotificationRouter/></React.StrictMode>);

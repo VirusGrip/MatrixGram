@@ -421,7 +421,7 @@ impl Account {
             if encrypted && !self.e2ee_enabled.load(Ordering::Acquire) {
                 continue;
             }
-            let events: Vec<Value> = room
+            let mut events: Vec<Value> = room
                 .timeline
                 .events
                 .iter()
@@ -436,6 +436,12 @@ impl Account {
                 matrix_sdk::sync::State::Before(events)
                 | matrix_sdk::sync::State::After(events) => events,
             };
+            events.extend(
+                state_events
+                    .iter()
+                    .filter_map(|event| serde_json::from_str::<Value>(event.json().get()).ok())
+                    .filter(|event| event["type"] == "m.room.pinned_events"),
+            );
             let changed_members = state_events
                 .iter()
                 .filter_map(|event| {

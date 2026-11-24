@@ -6,8 +6,9 @@ import {INLINE_FILE_BYTES} from './files';
 import {downloadAttachment,useDownloads,downloadKey,cancelDownload} from './Downloads';
 export { fileBase64 } from './files';
 import { useStore } from './store';
+import {ImageViewer} from './ImageViewer';
 import type { Attachment } from './models';
-import { Modal, errorText } from './ui';
+import { errorText } from './ui';
 
 const cache = new Map<string, { promise: Promise<string>; size: number }>();
 let cacheBytes = 0;
@@ -66,7 +67,7 @@ export function MediaView({ attachment }: { attachment: Attachment }) {
     {download?.state==='saved'&&<small role="status">Файл сохранён</small>}
     {error && <div className="media-error">{error}<button className="text-button" onClick={() => { evict(JSON.stringify(attachment.source)); setLoad(false); requestAnimationFrame(() => setLoad(true)); }}>Повторить</button></div>}
     {(url||error) && <button className="text-button media-save" disabled={saving} onClick={() => { void save(); }}><Download size={13}/>Сохранить</button>}
-    {opened && <Modal title={attachment.name} close={() => setOpened(false)}><div className="media-viewer">{url && <img src={url} alt={attachment.name}/>}<button className="primary" onClick={() => { void save(); }}>Сохранить изображение</button></div></Modal>}
+    {opened && url && <ImageViewer name={attachment.name} url={url} close={()=>setOpened(false)} save={()=>{void save();}}/>}
   </div>;
 }
 

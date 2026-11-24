@@ -42,6 +42,9 @@ pub(crate) fn media_cache_request(source: &MediaSource) -> Result<MediaRequestPa
     rename_all_fields = "camelCase"
 )]
 pub enum Operation {
+    Pinned {
+        room_id: String,
+    },
     Profile {
         user_id: Option<String>,
     },
@@ -217,6 +220,13 @@ fn power_number(value: matrix_sdk::ruma::events::room::power_levels::UserPowerLe
 impl Account {
     pub async fn operation(&self, operation: Operation) -> Result<Value> {
         match operation {
+            Operation::Pinned { room_id } => Ok(json!(
+                self.room(&room_id)?
+                    .load_pinned_events()
+                    .await
+                    .map_err(network_error)?
+                    .unwrap_or_default()
+            )),
             Operation::PollPage {
                 room_id,
                 event_id,
